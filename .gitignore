@@ -39,3 +39,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.vercel
+.env*
+
+# Extension build output
+extension/node_modules/
+extension/out/
+extension/*.vsix
+
+# Plan files / local-only
+.claude/

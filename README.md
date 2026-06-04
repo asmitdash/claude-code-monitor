@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Claude Code Monitor
 
-## Getting Started
+Team-locked dashboard for monitoring Claude Code usage on a small (≤6 people) team. Built for the Cynergy team to coordinate a single shared Claude Code seat.
 
-First, run the development server:
+## What it does
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Each teammate signs in via Google. Whitelisted emails only.
+- One person at a time gets the active "slot" (60 min, soft-warning only — never auto-killed).
+- Other teammates queue up; the active user and the next-in-queue both get a 10-minute heads-up email.
+- The team lead sees live presence ("is Vedant's Claude Code currently running?"), the active slot, the queue, and per-teammate 7-day usage bars.
+- The team lead can hard-kill any active session: a kill flag is set on the server, the teammate's VS Code extension writes a local flag file, and the next Claude Code tool call gets refused by a `PreToolUse` hook.
+
+## Architecture
+
+```
+Next.js app on Vercel  ──── Neon Postgres
+       ▲    ▲
+       │    │ POST /api/extension/status (every 10s)
+       │    │ POST /api/ingest (every Claude Code event)
+       │    │
+   Google   ├── VS Code extension "Claude Monitor"
+   OAuth    │       (status bar, modal, hook installer)
+            │
+            └── ~/.claude/settings.json hook
+                  → POSTs telemetry, refuses tool calls when blocked
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The VS Code extension is a thin client. The real teeth are the Claude Code hook in `~/.claude/settings.json` — it fires for every tool call regardless of whether Claude Code is invoked from the terminal, the official VS Code extension panel, or any other surface, and exit-code-2 there means the tool call gets refused.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Repo layout
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `src/` — Next.js 16 app (App Router, Drizzle, NextAuth v5, Tailwind v4)
+- `extension/` — VS Code extension (`Claude Monitor`)
+- `drizzle/` — generated SQL migrations
 
-## Learn More
+## Required env vars
 
-To learn more about Next.js, take a look at the following resources:
+- `DATABASE_URL` (auto-provisioned by Vercel ↔ Neon)
+- `AUTH_SECRET` / `NEXTAUTH_SECRET`
+- `AUTH_TRUST_HOST=true`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- `TL_EMAILS` (comma-separated; team lead accounts)
+- `MEMBER_EMAILS` (comma-separated; everyone else allowed)
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+- `CRON_SECRET`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+A Vercel cron at `* * * * *` hits `/api/cron/warnings` to send 10-minute reminder emails.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Local dev
 
-## Deploy on Vercel
+```bash
+npm install
+npx drizzle-kit push
+npm run dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Extension build + install
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+cd extension
+npm install
+npm run build
+npm run package
+code --install-extension claude-monitor-0.1.0.vsix
+```
+
+Then run **Claude Monitor: Sign in (paste API token)** from the command palette and paste the dashboard URL + the API token shown on your dashboard.

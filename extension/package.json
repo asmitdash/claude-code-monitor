@@ -1,0 +1,64 @@
+{
+  "name": "claude-monitor",
+  "displayName": "Claude Monitor",
+  "description": "Reports Claude Code activity to your team's Claude Code Monitor dashboard, and enforces the team lead's kill-switch via a Claude Code PreToolUse hook.",
+  "version": "0.1.0",
+  "publisher": "asmitdash",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeMonitor.signIn",
+        "title": "Claude Monitor: Sign in (paste API token)"
+      },
+      {
+        "command": "claudeMonitor.signOut",
+        "title": "Claude Monitor: Sign out"
+      },
+      {
+        "command": "claudeMonitor.installHook",
+        "title": "Claude Monitor: Install/refresh Claude Code hook"
+      },
+      {
+        "command": "claudeMonitor.openDashboard",
+        "title": "Claude Monitor: Open dashboard"
+      },
+      {
+        "command": "claudeMonitor.clearKill",
+        "title": "Claude Monitor: Clear local kill flag"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Monitor",
+      "properties": {
+        "claudeMonitor.serverUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL of the Claude Code Monitor app (e.g. https://claude-code-monitor.vercel.app)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -p . -w",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --no-yarn --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.3.0"
+  }
+}
