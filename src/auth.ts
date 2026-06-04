@@ -24,7 +24,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const email = String(credentials?.email ?? "").trim().toLowerCase();
         const password = String(credentials?.password ?? "");
         if (!email || !password) return null;
-        if (!isAllowed(email)) return null;
+        if (!(await isAllowed(email))) return null;
 
         const existing = await db
           .select()
@@ -32,13 +32,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           .where(eq(schema.users.email, email))
           .limit(1);
 
+        const role = await roleFor(email);
+
         if (existing.length === 0) {
           const hash = await bcrypt.hash(password, 10);
           const [created] = await db
             .insert(schema.users)
             .values({
               email,
-              role: roleFor(email),
+              role,
               apiToken: generateToken(),
               passwordHash: hash,
             })
@@ -55,7 +57,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const hash = await bcrypt.hash(password, 10);
           await db
             .update(schema.users)
-            .set({ passwordHash: hash, role: roleFor(email) })
+            .set({ passwordHash: hash, role })
             .where(eq(schema.users.id, user.id));
           return { id: user.id, email: user.email, name: user.name ?? email.split("@")[0] };
         }
@@ -63,10 +65,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const ok = await bcrypt.compare(password, user.passwordHash);
         if (!ok) return null;
 
-        if (user.role !== roleFor(email)) {
+        if (user.role !== role) {
           await db
             .update(schema.users)
-            .set({ role: roleFor(email) })
+            .set({ role })
             .where(eq(schema.users.id, user.id));
         }
 
@@ -80,11 +82,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   callbacks: {
     async jwt({ token, user }) {
-      if (user?.email) {
+      const email = (user?.email ?? token.email) as string | undefined;
+      if (email) {
         const dbUser = await db
           .select()
           .from(schema.users)
-          .where(eq(schema.users.email, user.email.toLowerCase()))
+          .where(eq(schema.users.email, email.toLowerCase()))
           .limit(1);
         if (dbUser[0]) {
           token.userId = dbUser[0].id;

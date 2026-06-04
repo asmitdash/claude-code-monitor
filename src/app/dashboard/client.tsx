@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useStatePoll } from "@/components/use-state-poll";
-import { UsageBars } from "@/components/usage-bars";
+import { UsageChart } from "@/components/usage-chart";
 import { Countdown } from "@/components/countdown";
 
 export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEmail: string }) {
@@ -178,7 +178,7 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
         <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-4">
           Your last 7 days
         </h2>
-        <UsageBars data={data.myUsage} />
+        <UsageChart data={data.myUsage} height={200} />
       </section>
 
       <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6">

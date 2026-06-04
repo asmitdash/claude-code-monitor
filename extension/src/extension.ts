@@ -249,7 +249,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand("claudeMonitor.signIn", async () => {
       const url = await vscode.window.showInputBox({
         prompt: "Server URL",
-        value: getServerUrl() || "https://claude-code-monitor.vercel.app",
+        value: getServerUrl() || "https://claude-code-monitor-theta.vercel.app",
         ignoreFocusOut: true,
       });
       if (url !== undefined) {

@@ -103,7 +103,15 @@ export const killFlags = pgTable("kill_flags", {
   setAt: timestamp("set_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const allowedEmails = pgTable("allowed_emails", {
+  email: text("email").primaryKey(),
+  role: roleEnum("role").notNull().default("member"),
+  addedBy: text("added_by"),
+  addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type User = typeof users.$inferSelect;
+export type AllowedEmail = typeof allowedEmails.$inferSelect;
 export type Slot = typeof slots.$inferSelect;
 export type QueueItem = typeof queue.$inferSelect;
 export type Event = typeof events.$inferSelect;
