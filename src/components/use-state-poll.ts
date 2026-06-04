@@ -29,7 +29,9 @@ export type StatePayload = {
     name: string | null;
     role: string;
     claudeRunning: boolean;
+    extensionAlive?: boolean;
     lastSeenAt: string | null;
+    lastEventAt?: string | null;
     vscodeWindow: string | null;
     hostname: string | null;
   }>;

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db, schema } from "@/db";
-import { eq, gt, and, desc } from "drizzle-orm";
+import { eq, gt, and, desc, sql } from "drizzle-orm";
 import { getActiveSlot, getQueue, getPresenceMap, getAllUsers } from "@/lib/slots";
 import { maybeRunWarnings } from "@/lib/warnings";
 
@@ -89,18 +89,37 @@ export async function GET() {
       )
     : [];
 
+  const sixtySecAgo = new Date(Date.now() - 60_000);
+  const recentEventRows = isTL
+    ? await db
+        .select({
+          userId: schema.events.userId,
+          last: sql<Date>`max(${schema.events.createdAt})`.as("last"),
+        })
+        .from(schema.events)
+        .where(gt(schema.events.createdAt, sixtySecAgo))
+        .groupBy(schema.events.userId)
+    : [];
+  const recentEventByUser = new Map<string, Date>(
+    recentEventRows.map((r) => [r.userId, new Date(r.last)]),
+  );
+
   const presenceArr = isTL
     ? usersList.map((u) => {
         const p = presence.get(u.id);
         const lastSeen = p?.lastSeenAt ? new Date(p.lastSeenAt).getTime() : 0;
         const fresh = lastSeen > Date.now() - 60_000;
+        const recentEvt = recentEventByUser.get(u.id);
+        const claudeReallyActive = !!recentEvt;
         return {
           id: u.id,
           email: u.email,
           name: u.name,
           role: u.role,
-          claudeRunning: fresh ? p?.claudeRunning ?? false : false,
+          claudeRunning: claudeReallyActive,
+          extensionAlive: fresh,
           lastSeenAt: p?.lastSeenAt ?? null,
+          lastEventAt: recentEvt ? recentEvt.toISOString() : null,
           vscodeWindow: p?.vscodeWindow ?? null,
           hostname: p?.hostname ?? null,
         };

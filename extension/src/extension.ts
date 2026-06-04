@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { execFile } from "child_process";
 
 const TOKEN_KEY = "claudeMonitor.apiToken";
 const KILL_DIR = path.join(os.homedir(), ".claude-monitor");
@@ -31,18 +32,11 @@ async function clearToken(ctx: vscode.ExtensionContext) {
   await ctx.secrets.delete(TOKEN_KEY);
 }
 
-function detectClaudeRunning(): boolean {
-  const ext = vscode.extensions.getExtension("anthropic.claude-code");
-  if (ext?.isActive) return true;
-
+function detectLocalClaudeSurfaces(): boolean {
   for (const t of vscode.window.terminals) {
     const name = (t.name ?? "").toLowerCase();
     if (name.includes("claude")) return true;
-    const exec = t.shellIntegration?.executeCommand;
-    if (exec) {
-    }
   }
-
   return claudeProcessSeen;
 }
 
@@ -65,6 +59,54 @@ async function clearKillFlag() {
   if (fs.existsSync(KILL_FLAG)) fs.unlinkSync(KILL_FLAG);
 }
 
+function killProcessesByName(names: string[]): Promise<void> {
+  return new Promise((resolve) => {
+    if (process.platform === "win32") {
+      let pending = names.length;
+      if (pending === 0) return resolve();
+      for (const n of names) {
+        execFile("taskkill", ["/F", "/T", "/IM", n], () => {
+          if (--pending === 0) resolve();
+        });
+      }
+    } else {
+      let pending = names.length;
+      if (pending === 0) return resolve();
+      for (const n of names) {
+        execFile("pkill", ["-9", "-f", n], () => {
+          if (--pending === 0) resolve();
+        });
+      }
+    }
+  });
+}
+
+async function enforceKill(reason: string) {
+  await writeKillFlag(reason);
+
+  for (const t of vscode.window.terminals) {
+    const name = (t.name ?? "").toLowerCase();
+    if (name.includes("claude") || name === "anthropic" || name.startsWith("@")) {
+      try {
+        t.dispose();
+      } catch {}
+    }
+  }
+  claudeProcessSeen = false;
+
+  await killProcessesByName(["claude.exe", "claude", "claude-code", "claude-code.exe"]);
+
+  try {
+    const ext = vscode.extensions.getExtension("anthropic.claude-code");
+    if (ext) {
+      await vscode.commands.executeCommand(
+        "workbench.extensions.action.disableExtension",
+        "anthropic.claude-code",
+      );
+    }
+  } catch {}
+}
+
 async function poll(ctx: vscode.ExtensionContext) {
   const url = getServerUrl();
   const token = await getToken(ctx);
@@ -73,7 +115,7 @@ async function poll(ctx: vscode.ExtensionContext) {
     return;
   }
 
-  const claudeRunning = detectClaudeRunning();
+  const localSurface = detectLocalClaudeSurfaces();
   const vscodeWindow = vscode.workspace.workspaceFolders?.[0]?.name ?? null;
   const hostname = os.hostname();
 
@@ -85,7 +127,7 @@ async function poll(ctx: vscode.ExtensionContext) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ claudeRunning, vscodeWindow, hostname }),
+      body: JSON.stringify({ claudeRunning: false, localSurface, vscodeWindow, hostname }),
     });
     if (!r.ok) {
       setStatus(`$(error) Claude Monitor: ${r.status}`, "#f87171");
@@ -101,16 +143,19 @@ async function poll(ctx: vscode.ExtensionContext) {
   const reason = (resp?.reason as string | null) ?? "ended by team lead";
 
   if (blocked) {
-    await writeKillFlag(reason);
+    await enforceKill(reason);
     if (!lastBlocked) {
       vscode.window
         .showWarningMessage(
-          `Claude Code BLOCKED: ${reason}`,
+          `Claude Code BLOCKED: ${reason}. Terminals closed and Claude Code extension disabled.`,
           { modal: true },
+          "Reload Window",
           "Open dashboard",
         )
         .then((sel) => {
-          if (sel === "Open dashboard" && url) {
+          if (sel === "Reload Window") {
+            vscode.commands.executeCommand("workbench.action.reloadWindow");
+          } else if (sel === "Open dashboard" && url) {
             vscode.env.openExternal(vscode.Uri.parse(url));
           }
         });
@@ -118,15 +163,13 @@ async function poll(ctx: vscode.ExtensionContext) {
     setStatus("$(circle-slash) Claude: BLOCKED", "#f87171", reason);
   } else {
     await clearKillFlag();
-    if (claudeRunning) {
-      setStatus("$(pulse) Claude: active", "#34d399");
+    const me = resp?.activeUser as { email?: string } | null | undefined;
+    if (me?.email) {
+      setStatus(`$(eye) Claude in use: ${me.email}`, "#fbbf24");
+    } else if (localSurface) {
+      setStatus("$(pulse) Claude Monitor: terminal open", "#fbbf24");
     } else {
-      const me = resp?.activeUser as { email?: string } | null | undefined;
-      if (me?.email) {
-        setStatus(`$(eye) Claude in use: ${me.email}`, "#fbbf24");
-      } else {
-        setStatus("$(check) Claude Monitor: idle");
-      }
+      setStatus("$(check) Claude Monitor: idle");
     }
   }
   lastBlocked = blocked;
