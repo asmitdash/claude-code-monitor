@@ -19,6 +19,7 @@ export const users = pgTable("users", {
   image: text("image"),
   role: roleEnum("role").notNull().default("member"),
   apiToken: text("api_token").notNull().unique(),
+  passwordHash: text("password_hash"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

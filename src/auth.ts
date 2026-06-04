@@ -1,9 +1,10 @@
 import NextAuth from "next-auth";
-import Google from "next-auth/providers/google";
+import Credentials from "next-auth/providers/credentials";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { isAllowed, roleFor } from "@/lib/allowlist";
 import { randomBytes } from "crypto";
+import bcrypt from "bcryptjs";
 
 function generateToken() {
   return "ccm_" + randomBytes(32).toString("hex");
@@ -11,10 +12,66 @@ function generateToken() {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
+  session: { strategy: "jwt" },
   providers: [
-    Google({
-      clientId: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    Credentials({
+      name: "Email + password",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        const email = String(credentials?.email ?? "").trim().toLowerCase();
+        const password = String(credentials?.password ?? "");
+        if (!email || !password) return null;
+        if (!isAllowed(email)) return null;
+
+        const existing = await db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.email, email))
+          .limit(1);
+
+        if (existing.length === 0) {
+          const hash = await bcrypt.hash(password, 10);
+          const [created] = await db
+            .insert(schema.users)
+            .values({
+              email,
+              role: roleFor(email),
+              apiToken: generateToken(),
+              passwordHash: hash,
+            })
+            .returning();
+          return {
+            id: created.id,
+            email: created.email,
+            name: created.name ?? email.split("@")[0],
+          };
+        }
+
+        const user = existing[0];
+        if (!user.passwordHash) {
+          const hash = await bcrypt.hash(password, 10);
+          await db
+            .update(schema.users)
+            .set({ passwordHash: hash, role: roleFor(email) })
+            .where(eq(schema.users.id, user.id));
+          return { id: user.id, email: user.email, name: user.name ?? email.split("@")[0] };
+        }
+
+        const ok = await bcrypt.compare(password, user.passwordHash);
+        if (!ok) return null;
+
+        if (user.role !== roleFor(email)) {
+          await db
+            .update(schema.users)
+            .set({ role: roleFor(email) })
+            .where(eq(schema.users.id, user.id));
+        }
+
+        return { id: user.id, email: user.email, name: user.name ?? email.split("@")[0] };
+      },
     }),
   ],
   pages: {
@@ -22,37 +79,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     error: "/login",
   },
   callbacks: {
-    async signIn({ user }) {
-      const email = user.email?.toLowerCase();
-      if (!isAllowed(email)) return false;
-
-      const existing = await db
-        .select()
-        .from(schema.users)
-        .where(eq(schema.users.email, email!))
-        .limit(1);
-
-      if (existing.length === 0) {
-        await db.insert(schema.users).values({
-          email: email!,
-          name: user.name ?? null,
-          image: user.image ?? null,
-          role: roleFor(email),
-          apiToken: generateToken(),
-        });
-      } else {
-        await db
-          .update(schema.users)
-          .set({
-            name: user.name ?? existing[0].name,
-            image: user.image ?? existing[0].image,
-            role: roleFor(email),
-          })
-          .where(eq(schema.users.email, email!));
-      }
-
-      return true;
-    },
     async jwt({ token, user }) {
       if (user?.email) {
         const dbUser = await db
