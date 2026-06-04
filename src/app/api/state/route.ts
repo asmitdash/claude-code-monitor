@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { db, schema } from "@/db";
 import { eq, gt, and, desc } from "drizzle-orm";
 import { getActiveSlot, getQueue, getPresenceMap, getAllUsers } from "@/lib/slots";
+import { maybeRunWarnings } from "@/lib/warnings";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,8 @@ export async function GET() {
   if (!me?.id) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const isTL = me.role === "tl";
+
+  maybeRunWarnings().catch(() => {});
 
   const active = await getActiveSlot();
   const queue = await getQueue();
