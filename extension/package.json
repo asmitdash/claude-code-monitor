@@ -2,7 +2,7 @@
   "name": "claude-monitor",
   "displayName": "Claude Monitor",
   "description": "Reports Claude Code activity to your team's Claude Code Monitor dashboard, and enforces the team lead's kill-switch via a Claude Code PreToolUse hook.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "asmitdash",
   "private": true,
   "engines": {
@@ -37,17 +37,7 @@
         "command": "claudeMonitor.clearKill",
         "title": "Claude Monitor: Clear local kill flag"
       }
-    ],
-    "configuration": {
-      "title": "Claude Monitor",
-      "properties": {
-        "claudeMonitor.serverUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Base URL of the Claude Code Monitor app (e.g. https://claude-code-monitor.vercel.app)"
-        }
-      }
-    }
+    ]
   },
   "scripts": {
     "build": "tsc -p .",

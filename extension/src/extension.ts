@@ -8,6 +8,7 @@ const KILL_DIR = path.join(os.homedir(), ".claude-monitor");
 const KILL_FLAG = path.join(KILL_DIR, "blocked");
 const HOOK_SCRIPT = path.join(KILL_DIR, "hook.mjs");
 const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
+const SERVER_URL = "https://claude-code-monitor-theta.vercel.app";
 
 let statusBar: vscode.StatusBarItem;
 let heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -15,8 +16,7 @@ let lastBlocked = false;
 let claudeProcessSeen = false;
 
 function getServerUrl(): string {
-  const url = vscode.workspace.getConfiguration("claudeMonitor").get<string>("serverUrl") || "";
-  return url.replace(/\/+$/, "");
+  return SERVER_URL;
 }
 
 async function getToken(ctx: vscode.ExtensionContext): Promise<string | undefined> {
@@ -240,6 +240,14 @@ async function writeTokenFileFromSecret(ctx: vscode.ExtensionContext) {
 }
 
 export async function activate(ctx: vscode.ExtensionContext) {
+  try {
+    const cfg = vscode.workspace.getConfiguration("claudeMonitor");
+    if (cfg.get<string>("serverUrl")) {
+      await cfg.update("serverUrl", undefined, vscode.ConfigurationTarget.Global);
+      await cfg.update("serverUrl", undefined, vscode.ConfigurationTarget.Workspace);
+    }
+  } catch {}
+
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBar.command = "claudeMonitor.openDashboard";
   statusBar.show();
@@ -247,18 +255,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   ctx.subscriptions.push(
     vscode.commands.registerCommand("claudeMonitor.signIn", async () => {
-      const url = await vscode.window.showInputBox({
-        prompt: "Server URL",
-        value: getServerUrl() || "https://claude-code-monitor-theta.vercel.app",
-        ignoreFocusOut: true,
-      });
-      if (url !== undefined) {
-        await vscode.workspace
-          .getConfiguration("claudeMonitor")
-          .update("serverUrl", url.replace(/\/+$/, ""), vscode.ConfigurationTarget.Global);
-      }
       const token = await vscode.window.showInputBox({
-        prompt: "Paste your API token from the dashboard (Extension API token section)",
+        prompt: `Paste your API token from ${SERVER_URL}/admin (Extension API token card)`,
         password: true,
         ignoreFocusOut: true,
         validateInput: (v) =>

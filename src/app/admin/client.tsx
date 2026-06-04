@@ -236,11 +236,18 @@ export function AdminClient({ apiToken }: { apiToken: string }) {
                         <div className="truncate">VS Code: {p.vscodeWindow}</div>
                       )}
                     </div>
-                    {isActive && p.id !== data.me.id && (
+                    {p.id !== data.me.id && (p.claudeRunning || isActive) && (
                       <div className="mt-3 pt-3 border-t border-neutral-800">
-                        <div className="text-xs text-emerald-300 mb-2">
-                          In active slot — ends in <Countdown to={data.active!.plannedEndAt} />
-                        </div>
+                        {isActive ? (
+                          <div className="text-xs text-emerald-300 mb-2">
+                            In active slot — ends in{" "}
+                            <Countdown to={data.active!.plannedEndAt} />
+                          </div>
+                        ) : (
+                          <div className="text-xs text-amber-300 mb-2">
+                            Running Claude without claiming a slot
+                          </div>
+                        )}
                         {confirmKill === p.id ? (
                           <div className="flex gap-2">
                             <button
@@ -267,7 +274,7 @@ export function AdminClient({ apiToken }: { apiToken: string }) {
                         )}
                       </div>
                     )}
-                    {!isActive && (
+                    {p.id !== data.me.id && !p.claudeRunning && !isActive && (
                       <button
                         onClick={() => startTransition(() => void unblock(p.id))}
                         className="mt-2 text-[10px] text-neutral-500 hover:text-neutral-300"
