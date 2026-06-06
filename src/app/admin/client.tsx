@@ -90,6 +90,7 @@ export function AdminClient({ apiToken }: { apiToken: string }) {
 
       {tab === "live" && (
         <div className="space-y-6">
+          <KillHistory pollMs={15000} />
           <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide">
@@ -310,6 +311,87 @@ export function AdminClient({ apiToken }: { apiToken: string }) {
         </code>
       </section>
     </main>
+  );
+}
+
+type KillEntry = {
+  slotId: string;
+  userId: string;
+  email: string;
+  name: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  endedBy: string | null;
+  purpose: string | null;
+  durationMin: number | null;
+};
+
+function KillHistory({ pollMs }: { pollMs: number }) {
+  const [kills, setKills] = useState<KillEntry[] | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    async function load() {
+      try {
+        const r = await fetch("/api/admin/kill-history", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (alive) setKills(j.kills ?? []);
+      } catch {
+        // ignore — admin won't be blocked by missing history
+      }
+    }
+    load();
+    const t = setInterval(load, pollMs);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [pollMs]);
+
+  if (!kills || kills.length === 0) return null;
+
+  return (
+    <section className="rounded-2xl border border-red-500/20 bg-red-500/5 p-6">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-medium text-red-300 uppercase tracking-wide">
+          Recent kills · last 14d · {kills.length}
+        </h2>
+        <button
+          onClick={() => setCollapsed((s) => !s)}
+          className="text-xs text-neutral-500 hover:text-neutral-300"
+        >
+          {collapsed ? "Show" : "Hide"}
+        </button>
+      </div>
+      {!collapsed && (
+        <ul className="space-y-1.5 max-h-56 overflow-y-auto pr-2">
+          {kills.map((k) => (
+            <li
+              key={k.slotId}
+              className="flex items-baseline justify-between text-sm border-b border-red-500/10 last:border-0 pb-1.5"
+            >
+              <div className="min-w-0 flex-1 pr-3">
+                <span className="font-medium">{k.name ?? k.email}</span>
+                <span className="text-xs text-neutral-500 ml-2">
+                  killed by {k.endedBy ?? "?"}
+                </span>
+                {k.purpose && (
+                  <div className="text-xs text-neutral-500 truncate">{k.purpose}</div>
+                )}
+              </div>
+              <div className="text-xs text-neutral-500 whitespace-nowrap">
+                {k.endedAt ? new Date(k.endedAt).toLocaleString() : "—"}
+                {k.durationMin != null && (
+                  <span className="ml-2 text-neutral-600">{k.durationMin}m</span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
