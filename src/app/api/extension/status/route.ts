@@ -2,7 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { userFromToken } from "@/lib/auth-token";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
-import { getActiveSlot, getQueue } from "@/lib/slots";
+import {
+  getActiveSlots,
+  getQueue,
+  estimateQueueWaitMinutes,
+} from "@/lib/slots";
+import { audit } from "@/lib/audit";
+import { activeRestrictions, hasActiveOverride } from "@/lib/quota";
+import { getConfig } from "@/lib/config";
+import { noteHeartbeat } from "@/lib/engine";
 
 export const runtime = "nodejs";
 
@@ -16,8 +24,15 @@ export async function POST(req: NextRequest) {
   } catch {}
 
   const claudeRunning = Boolean(body.claudeRunning);
-  const vscodeWindow = body.vscodeWindow ? String(body.vscodeWindow) : null;
-  const hostname = body.hostname ? String(body.hostname) : null;
+  const claudeOpen =
+    Boolean(body.claudeOpen) || Boolean(body.localSurface);
+  const vscodeOpen = Boolean(body.vscodeOpen ?? true);
+  const windowFocused = Boolean(body.windowFocused ?? true);
+  const vscodeWindow = body.vscodeWindow ? String(body.vscodeWindow).slice(0, 200) : null;
+  const hostname = body.hostname ? String(body.hostname).slice(0, 100) : null;
+  const extensionVersion = body.extensionVersion
+    ? String(body.extensionVersion).slice(0, 30)
+    : null;
 
   await db
     .insert(schema.presence)
@@ -25,18 +40,39 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       lastSeenAt: new Date(),
       claudeRunning,
+      claudeOpen,
+      vscodeOpen,
+      windowFocused,
       vscodeWindow,
       hostname,
+      extensionVersion,
     })
     .onConflictDoUpdate({
       target: schema.presence.userId,
       set: {
         lastSeenAt: new Date(),
         claudeRunning,
+        claudeOpen,
+        vscodeOpen,
+        windowFocused,
         vscodeWindow,
         hostname,
+        extensionVersion,
       },
     });
+
+  // Bump heartbeat on user's slot if any
+  const active = await getActiveSlots();
+  const myActive = active.find((s) => s.user.id === user.id);
+  if (myActive) {
+    await noteHeartbeat(myActive.slot.id);
+  }
+
+  const queue = await getQueue();
+  const cfg = await getConfig();
+  const myQueuePos = queue.findIndex((q) => q.user.id === user.id);
+  const eta =
+    myQueuePos >= 0 ? await estimateQueueWaitMinutes(myQueuePos + 1) : null;
 
   const flag = await db
     .select()
@@ -44,21 +80,77 @@ export async function POST(req: NextRequest) {
     .where(eq(schema.killFlags.userId, user.id))
     .limit(1);
 
-  const active = await getActiveSlot();
-  const queue = await getQueue();
-  const myActive = active && active.user.id === user.id ? active : null;
-  const myQueuePos = queue.findIndex((q) => q.user.id === user.id);
+  const restr = await activeRestrictions(user.id);
+  const override = await hasActiveOverride(user.id);
+
+  // Server-side slot enforcement: if user is running Claude (claudeRunning OR
+  // claudeOpen) but holds neither a slot nor an active override, log the
+  // unauthorized attempt. The hook still does the actual blocking, but the
+  // server records and exposes this so TLs can act.
+  let unauthorized = false;
+  if ((claudeRunning || claudeOpen) && !myActive && !override.active) {
+    unauthorized = true;
+    await audit({
+      action: "unauthorized.attempt",
+      severity: "warn",
+      actorUserId: user.id,
+      actorEmail: user.email,
+      targetUserId: user.id,
+      targetEmail: user.email,
+      metadata: {
+        source: "heartbeat",
+        claudeRunning,
+        claudeOpen,
+        hostname,
+        vscodeWindow,
+      },
+    });
+  }
+
+  const blocked =
+    flag[0]?.blocked === true ||
+    restr.banned ||
+    restr.paused ||
+    (!myActive && !override.active && unauthorized);
 
   return NextResponse.json({
     ok: true,
-    blocked: flag[0]?.blocked ?? false,
-    reason: flag[0]?.reason ?? null,
-    activeUser: active
-      ? { email: active.user.email, name: active.user.name, plannedEndAt: active.slot.plannedEndAt }
+    blocked,
+    reason:
+      flag[0]?.reason ??
+      (restr.banned
+        ? "banned"
+        : restr.paused
+        ? "paused by team lead"
+        : unauthorized
+        ? "no active slot — request one in the dashboard"
+        : null),
+    activeUsers: active.map((s) => ({
+      email: s.user.email,
+      name: s.user.name,
+      plannedEndAt: s.slot.plannedEndAt,
+      slotNumber: s.slot.slotNumber,
+    })),
+    activeUser: active[0]
+      ? {
+          email: active[0].user.email,
+          name: active[0].user.name,
+          plannedEndAt: active[0].slot.plannedEndAt,
+        }
       : null,
     mySlot: myActive
-      ? { startedAt: myActive.slot.startedAt, plannedEndAt: myActive.slot.plannedEndAt }
+      ? {
+          startedAt: myActive.slot.startedAt,
+          plannedEndAt: myActive.slot.plannedEndAt,
+          slotNumber: myActive.slot.slotNumber,
+        }
       : null,
     myQueuePosition: myQueuePos >= 0 ? myQueuePos + 1 : null,
+    myQueueEtaMin: eta,
+    myOverride: override.active,
+    config: {
+      maxConcurrentSlots: cfg.maxConcurrentSlots,
+      pollIntervalSeconds: 10,
+    },
   });
 }

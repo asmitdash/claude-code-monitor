@@ -2,7 +2,7 @@
   "name": "claude-monitor",
   "displayName": "Claude Monitor",
   "description": "Reports Claude Code activity to your team's Claude Code Monitor dashboard, and enforces the team lead's kill-switch via a Claude Code PreToolUse hook.",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "publisher": "asmitdash",
   "private": true,
   "engines": {
@@ -36,6 +36,10 @@
       {
         "command": "claudeMonitor.clearKill",
         "title": "Claude Monitor: Clear local kill flag"
+      },
+      {
+        "command": "claudeMonitor.requestSlot",
+        "title": "Claude Monitor: Request a Claude slot"
       }
     ]
   },

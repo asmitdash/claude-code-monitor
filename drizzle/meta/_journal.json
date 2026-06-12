@@ -8,6 +8,13 @@
       "when": 1780554213179,
       "tag": "0000_right_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781285021405,
+      "tag": "0001_two_slot_redesign",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { db, schema } from "@/db";
 import { and, desc, eq, gt } from "drizzle-orm";
+import { requireTL } from "@/lib/session-helper";
+import { quotaFor, activeRestrictions } from "@/lib/quota";
 
 export const runtime = "nodejs";
 
@@ -13,14 +14,10 @@ export async function GET(
   _req: NextRequest,
   ctx: { params: Promise<{ userId: string }> },
 ) {
-  const session = await auth();
-  const me = session?.user as { id?: string; role?: string } | undefined;
-  if (!me?.id || me.role !== "tl") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
+  const me = await requireTL();
+  if (!me) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { userId } = await ctx.params;
-
   const userRows = await db
     .select()
     .from(schema.users)
@@ -41,7 +38,7 @@ export async function GET(
     .from(schema.events)
     .where(and(eq(schema.events.userId, userId), gt(schema.events.createdAt, since)))
     .orderBy(desc(schema.events.createdAt))
-    .limit(500);
+    .limit(2000);
 
   const presence = await db
     .select()
@@ -54,7 +51,9 @@ export async function GET(
     const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
     days.push(startOfDay(d).toISOString().slice(0, 10));
   }
-  const dailyMap = new Map(days.map((day) => [day, { day, minutes: 0, sessions: 0, events: 0 }]));
+  const dailyMap = new Map(
+    days.map((day) => [day, { day, minutes: 0, sessions: 0, events: 0 }]),
+  );
   for (const slot of slots) {
     const day = startOfDay(new Date(slot.startedAt)).toISOString().slice(0, 10);
     const end = slot.endedAt ?? new Date();
@@ -83,6 +82,22 @@ export async function GET(
     .slice(0, 10)
     .map(([tool, count]) => ({ tool, count }));
 
+  const quota = await quotaFor(userId);
+  const restrictions = await activeRestrictions(userId);
+  const recentApprovals = await db
+    .select()
+    .from(schema.approvals)
+    .where(eq(schema.approvals.userId, userId))
+    .orderBy(desc(schema.approvals.requestedAt))
+    .limit(20);
+
+  const recentAudit = await db
+    .select()
+    .from(schema.auditLog)
+    .where(eq(schema.auditLog.targetUserId, userId))
+    .orderBy(desc(schema.auditLog.createdAt))
+    .limit(50);
+
   return NextResponse.json({
     user: {
       id: user.id,
@@ -92,20 +107,23 @@ export async function GET(
       createdAt: user.createdAt,
     },
     daily: Array.from(dailyMap.values()),
-    presence: presence[0]
-      ? {
-          lastSeenAt: presence[0].lastSeenAt,
-          claudeRunning: presence[0].claudeRunning,
-          hostname: presence[0].hostname,
-          vscodeWindow: presence[0].vscodeWindow,
-        }
-      : null,
-    recentSlots: slots.slice(0, 25).map((s) => ({
+    presence: presence[0] ?? null,
+    recentSlots: slots.slice(0, 50).map((s) => ({
       id: s.id,
+      slotNumber: s.slotNumber,
+      status: s.status,
       startedAt: s.startedAt,
       endedAt: s.endedAt,
       endedBy: s.endedBy,
+      durationMinutes: s.durationMinutes,
+      extendedMinutes: s.extendedMinutes,
+      activityScore: s.activityScore,
+      toolCallCount: s.toolCallCount,
+      eventCount: s.eventCount,
+      estimatedTokens: s.estimatedTokens,
+      estimatedCostUsd: s.estimatedCostMicros / 1_000_000,
       purpose: s.purpose,
+      cwd: s.cwd,
     })),
     topTools,
     totalSessions: slots.length,
@@ -115,12 +133,15 @@ export async function GET(
           acc +
           Math.max(
             0,
-            (new Date(s.endedAt ?? new Date()).getTime() -
-              new Date(s.startedAt).getTime()) /
+            (new Date(s.endedAt ?? new Date()).getTime() - new Date(s.startedAt).getTime()) /
               60000,
           ),
         0,
       ),
     ),
+    quota,
+    restrictions,
+    recentApprovals,
+    recentAudit,
   });
 }

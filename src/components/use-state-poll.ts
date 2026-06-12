@@ -1,40 +1,143 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
+export type SlotInfo = {
+  id: string;
+  slotNumber: number;
+  userId: string;
+  email: string;
+  name: string | null;
+  startedAt: string;
+  plannedEndAt: string;
+  durationMinutes: number;
+  extendedMinutes: number;
+  purpose: string | null;
+  cwd: string | null;
+  activityScore: number;
+  activityLabel: "idle" | "light" | "active" | "heavy";
+  toolCallCount: number;
+  eventCount: number;
+  estimatedTokens: number;
+  lastActivityAt: string | null;
+  lastHeartbeatAt: string | null;
+  isOverride: boolean;
+};
+
+export type QueueEntry = {
+  position: number;
+  etaMin: number;
+  userId: string;
+  email: string;
+  name: string | null;
+  requestedAt: string;
+  desiredMinutes: number;
+  urgent: boolean;
+  note: string | null;
+};
+
+export type PresenceItem = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  state: "active" | "claude_idle" | "vscode" | "offline" | "ended" | "override";
+  stateIcon: string;
+  stateLabel: string;
+  claudeRunning: boolean;
+  extensionAlive: boolean;
+  lastSeenAt: string | null;
+  lastEventAt: string | null;
+  activityScore: number;
+  activityLabel: "idle" | "light" | "active" | "heavy";
+  vscodeWindow: string | null;
+  hostname: string | null;
+  extensionVersion: string | null;
+  hasOverride: boolean;
+  activeSlotNumber: number | null;
+};
+
 export type StatePayload = {
-  me: { id: string; role: string };
-  active: {
-    userId: string;
+  me: {
+    id: string;
+    role: string;
     email: string;
-    name: string | null;
+    isImpersonating: boolean;
+    realActorEmail: string;
+  };
+  config: {
+    maxConcurrentSlots: number;
+    maxSlotMinutes: number;
+    idleWarnMinutes: number;
+    idleAutoEndMinutes: number;
+    graceTimerSeconds: number;
+  };
+  banner: { message: string; severity: string; expiresAt: string | null } | null;
+  freeze: { until: string; banner: string | null } | null;
+  slots: SlotInfo[];
+  queue: QueueEntry[];
+  myActive: {
+    id: string;
+    slotNumber: number;
     startedAt: string;
     plannedEndAt: string;
+    durationMinutes: number;
+    extendedMinutes: number;
     purpose: string | null;
   } | null;
-  queue: Array<{
+  myQueueEntry: {
+    id: string;
     position: number;
+    etaMin: number;
+    desiredMinutes: number;
+    urgent: boolean;
+    note: string | null;
+  } | null;
+  myQuota: {
+    dailyMinutes: number;
+    weeklyMinutes: number;
+    dailyUsedMinutes: number;
+    weeklyUsedMinutes: number;
+    dailyRemainingMinutes: number;
+    weeklyRemainingMinutes: number;
+    exhausted: boolean;
+  };
+  myOverride: { id: string; expiresAt: string | null } | null;
+  myRestriction:
+    | {
+        paused: boolean;
+        banned: boolean;
+        cooldownUntil: string | null;
+        reason: string | null;
+      }
+    | null;
+  myApprovals: Array<{
+    id: string;
+    status: string;
+    reason: string | null;
+    desiredMinutes: number;
+    requestedAt: string;
+    decidedAt: string | null;
+    decidedBy: string | null;
+    decisionNote: string | null;
+    expiresAt: string | null;
+    consumedSlotId: string | null;
+  }>;
+  pendingApprovals: Array<{
+    id: string;
     userId: string;
     email: string;
     name: string | null;
     requestedAt: string;
+    reason: string | null;
+    desiredMinutes: number;
+    expiresAt: string | null;
   }>;
   myUsage: Array<{ day: string; minutes: number; sessions: number }>;
   allUsage: Array<{
     user: { id: string; email: string; name: string | null };
     days: Array<{ day: string; minutes: number; sessions: number }>;
   }>;
-  presence: Array<{
-    id: string;
-    email: string;
-    name: string | null;
-    role: string;
-    claudeRunning: boolean;
-    extensionAlive?: boolean;
-    lastSeenAt: string | null;
-    lastEventAt?: string | null;
-    vscodeWindow: string | null;
-    hostname: string | null;
-  }>;
+  presence: PresenceItem[];
   serverNow: string;
 };
 

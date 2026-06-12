@@ -1,21 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireTL } from "@/lib/session-helper";
 import { listMembers, addMember, removeMember } from "@/lib/allowlist";
+import { audit } from "@/lib/audit";
 
 export const runtime = "nodejs";
-
-async function requireTL() {
-  const session = await auth();
-  const me = session?.user as { id?: string; role?: string; email?: string } | undefined;
-  if (!me?.id || me.role !== "tl") return null;
-  return me;
-}
 
 export async function GET() {
   const me = await requireTL();
   if (!me) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  const members = await listMembers();
-  return NextResponse.json({ members });
+  return NextResponse.json({ members: await listMembers() });
 }
 
 export async function POST(req: NextRequest) {
@@ -26,7 +19,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "missing_email" }, { status: 400 });
   }
   const r = role === "tl" ? "tl" : "member";
-  await addMember(email, r, me.email ?? "tl");
+  await addMember(email, r, me.realActorEmail);
+  await audit({
+    action: "member.added",
+    actorUserId: me.realActorId,
+    actorEmail: me.realActorEmail,
+    actorRole: "tl",
+    targetEmail: email,
+    metadata: { role: r },
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -40,5 +41,13 @@ export async function DELETE(req: NextRequest) {
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
+  await audit({
+    action: "member.removed",
+    severity: "warn",
+    actorUserId: me.realActorId,
+    actorEmail: me.realActorEmail,
+    actorRole: "tl",
+    targetEmail: email,
+  });
   return NextResponse.json({ ok: true });
 }

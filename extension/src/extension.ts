@@ -10,11 +10,13 @@ const KILL_FLAG = path.join(KILL_DIR, "blocked");
 const HOOK_SCRIPT = path.join(KILL_DIR, "hook.mjs");
 const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const SERVER_URL = "https://claude-code-monitor-theta.vercel.app";
+const EXT_VERSION = "0.2.0";
 
 let statusBar: vscode.StatusBarItem;
 let heartbeat: ReturnType<typeof setInterval> | null = null;
 let lastBlocked = false;
 let claudeProcessSeen = false;
+let windowFocused = true;
 
 function getServerUrl(): string {
   return SERVER_URL;
@@ -32,22 +34,35 @@ async function clearToken(ctx: vscode.ExtensionContext) {
   await ctx.secrets.delete(TOKEN_KEY);
 }
 
-function detectLocalClaudeSurfaces(): boolean {
+function detectClaudeOpen(): boolean {
+  // Terminal name match
   for (const t of vscode.window.terminals) {
     const name = (t.name ?? "").toLowerCase();
     if (name.includes("claude")) return true;
   }
+  // Real "is Anthropic Claude Code extension currently active?"
+  try {
+    const ext = vscode.extensions.getExtension("anthropic.claude-code");
+    if (ext?.isActive) return true;
+  } catch {}
+  return claudeProcessSeen;
+}
+
+function detectClaudeRunning(): boolean {
+  // We approximate "running" as "the official Claude Code extension is active
+  // OR a terminal with claude in the name is open." A truer signal would
+  // require sniffing the extension's state machine, which is not exposed.
+  try {
+    const ext = vscode.extensions.getExtension("anthropic.claude-code");
+    if (ext?.isActive) return true;
+  } catch {}
   return claudeProcessSeen;
 }
 
 function setStatus(text: string, color?: string, tooltip?: string) {
   statusBar.text = text;
   statusBar.tooltip = tooltip ?? text;
-  if (color) {
-    statusBar.color = color;
-  } else {
-    statusBar.color = undefined;
-  }
+  statusBar.color = color;
 }
 
 async function writeKillFlag(reason: string) {
@@ -83,7 +98,6 @@ function killProcessesByName(names: string[]): Promise<void> {
 
 async function enforceKill(reason: string) {
   await writeKillFlag(reason);
-
   for (const t of vscode.window.terminals) {
     const name = (t.name ?? "").toLowerCase();
     if (name.includes("claude") || name === "anthropic" || name.startsWith("@")) {
@@ -93,9 +107,7 @@ async function enforceKill(reason: string) {
     }
   }
   claudeProcessSeen = false;
-
   await killProcessesByName(["claude.exe", "claude", "claude-code", "claude-code.exe"]);
-
   try {
     const ext = vscode.extensions.getExtension("anthropic.claude-code");
     if (ext) {
@@ -115,7 +127,8 @@ async function poll(ctx: vscode.ExtensionContext) {
     return;
   }
 
-  const localSurface = detectLocalClaudeSurfaces();
+  const claudeOpen = detectClaudeOpen();
+  const claudeRunning = detectClaudeRunning();
   const vscodeWindow = vscode.workspace.workspaceFolders?.[0]?.name ?? null;
   const hostname = os.hostname();
 
@@ -127,7 +140,16 @@ async function poll(ctx: vscode.ExtensionContext) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ claudeRunning: false, localSurface, vscodeWindow, hostname }),
+      body: JSON.stringify({
+        claudeRunning,
+        claudeOpen,
+        localSurface: claudeOpen,
+        vscodeOpen: true,
+        windowFocused,
+        vscodeWindow,
+        hostname,
+        extensionVersion: EXT_VERSION,
+      }),
     });
     if (!r.ok) {
       setStatus(`$(error) Claude Monitor: ${r.status}`, "#f87171");
@@ -163,10 +185,29 @@ async function poll(ctx: vscode.ExtensionContext) {
     setStatus("$(circle-slash) Claude: BLOCKED", "#f87171", reason);
   } else {
     await clearKillFlag();
-    const me = resp?.activeUser as { email?: string } | null | undefined;
-    if (me?.email) {
-      setStatus(`$(eye) Claude in use: ${me.email}`, "#fbbf24");
-    } else if (localSurface) {
+    const queuePos = resp?.myQueuePosition as number | null;
+    const eta = resp?.myQueueEtaMin as number | null;
+    const mySlot = resp?.mySlot as { slotNumber?: number; plannedEndAt?: string } | null;
+    const activeUsers = resp?.activeUsers as Array<{ email?: string }> | undefined;
+    if (mySlot && mySlot.plannedEndAt) {
+      const remainMs = new Date(mySlot.plannedEndAt).getTime() - Date.now();
+      const remainMin = Math.max(0, Math.round(remainMs / 60000));
+      setStatus(
+        `$(record) Claude slot ${mySlot.slotNumber ?? "?"} · ${remainMin}m left`,
+        "#34d399",
+      );
+    } else if (queuePos != null) {
+      setStatus(
+        `$(watch) Queue #${queuePos}${eta != null ? ` · ~${eta}m` : ""}`,
+        "#fbbf24",
+      );
+    } else if (activeUsers && activeUsers.length > 0) {
+      const list = activeUsers
+        .map((u) => u.email ?? "?")
+        .filter(Boolean)
+        .join(", ");
+      setStatus(`$(eye) Claude active: ${list}`, "#fbbf24");
+    } else if (claudeOpen) {
       setStatus("$(pulse) Claude Monitor: terminal open", "#fbbf24");
     } else {
       setStatus("$(check) Claude Monitor: idle");
@@ -180,7 +221,7 @@ async function ensureHookInstalled() {
   const url = getServerUrl();
 
   const hookScript = `#!/usr/bin/env node
-// Claude Monitor hook — reports telemetry to the dashboard and blocks tool calls when the kill flag is set.
+// Claude Monitor hook v${EXT_VERSION} — reports telemetry and blocks tool calls when the kill flag is set.
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -200,6 +241,11 @@ const eventType = payload.hook_event_name || payload.eventType || process.argv[2
 const sessionId = payload.session_id || payload.sessionId || null;
 const cwd = payload.cwd || process.cwd();
 const tool = payload.tool_name || (payload.tool_input && payload.tool_input.name) || null;
+const model =
+  payload.model ||
+  (payload.tool_response && payload.tool_response.model) ||
+  (payload.message && payload.message.model) ||
+  null;
 
 let token = "";
 try { token = fs.readFileSync(TOKEN_FILE, "utf-8").trim(); } catch {}
@@ -208,8 +254,12 @@ if (token && SERVER) {
   try {
     await fetch(SERVER + "/api/ingest", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
-      body: JSON.stringify({ event_type: eventType, session_id: sessionId, cwd, tool, payload }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + token,
+        "X-Claude-Monitor-Ext": ${JSON.stringify(EXT_VERSION)},
+      },
+      body: JSON.stringify({ event_type: eventType, session_id: sessionId, cwd, tool, model, payload }),
     }).catch(() => {});
   } catch {}
 }
@@ -245,7 +295,9 @@ process.exit(0);
   const command = `node "${HOOK_SCRIPT.replace(/\\/g, "\\\\")}"`;
 
   function ensureHookFor(eventName: string) {
-    const arr = (hooks[eventName] as Array<{ matcher?: string; hooks?: Array<Record<string, unknown>> }>) ?? [];
+    const arr =
+      (hooks[eventName] as Array<{ matcher?: string; hooks?: Array<Record<string, unknown>> }>) ??
+      [];
     let bucket = arr.find((b) => (b.matcher ?? "*") === "*");
     if (!bucket) {
       bucket = { matcher: "*", hooks: [] };
@@ -337,6 +389,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
       await clearKillFlag();
       vscode.window.showInformationMessage("Claude Monitor: local kill flag cleared.");
     }),
+    vscode.commands.registerCommand("claudeMonitor.requestSlot", async () => {
+      const url = getServerUrl();
+      vscode.env.openExternal(vscode.Uri.parse(`${url}/dashboard`));
+    }),
   );
 
   ctx.subscriptions.push(
@@ -349,6 +405,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
       claudeProcessSeen = vscode.window.terminals.some((t) =>
         (t.name ?? "").toLowerCase().includes("claude"),
       );
+    }),
+    vscode.window.onDidChangeWindowState((s) => {
+      windowFocused = s.focused;
     }),
   );
 
