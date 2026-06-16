@@ -12,9 +12,10 @@ import {
   plannedEndAt,
 } from "@/lib/slots";
 import { activeRestrictions, hasActiveOverride, lastForceKillAt, quotaFor } from "@/lib/quota";
+import { isTLBypass } from "@/lib/role";
 
 export type ClaimDecision =
-  | { ok: true; slot: typeof schema.slots.$inferSelect; reason: "allocated" | "override" }
+  | { ok: true; slot: typeof schema.slots.$inferSelect; reason: "allocated" | "override" | "tl_bypass" }
   | { ok: false; reason: "no_capacity"; queued?: { id: string; position: number; etaMin: number } }
   | { ok: false; reason: "exceeds_max_minutes"; cap: number }
   | { ok: false; reason: "paused" | "banned" }
@@ -26,6 +27,7 @@ export type ClaimDecision =
 export async function tryClaim(opts: {
   userId: string;
   email: string;
+  role?: string | null;
   desiredMinutes?: number;
   purpose?: string | null;
   cwd?: string | null;
@@ -33,12 +35,19 @@ export async function tryClaim(opts: {
   note?: string | null;
 }): Promise<ClaimDecision> {
   const cfg = await getConfig();
-  const desired = Math.min(
-    Math.max(15, opts.desiredMinutes ?? 60),
-    cfg.maxSlotMinutes,
-  );
+  const tlBypass = isTLBypass(opts.role);
+  // TLs are exempt from the slot duration cap entirely — they pick whatever
+  // duration they ask for (still floored at 15m to avoid junk slots).
+  const desired = tlBypass
+    ? Math.max(15, opts.desiredMinutes ?? 60)
+    : Math.min(Math.max(15, opts.desiredMinutes ?? 60), cfg.maxSlotMinutes);
 
-  if (cfg.freezeUntil && new Date(cfg.freezeUntil).getTime() > Date.now()) {
+  // System freeze and member restrictions don't apply to TLs.
+  if (
+    !tlBypass &&
+    cfg.freezeUntil &&
+    new Date(cfg.freezeUntil).getTime() > Date.now()
+  ) {
     return { ok: false, reason: "freeze", until: cfg.freezeUntil };
   }
 
@@ -47,16 +56,18 @@ export async function tryClaim(opts: {
     return { ok: false, reason: "already_active", slot: existing.slot };
   }
 
-  const restr = await activeRestrictions(opts.userId);
-  if (restr.banned) return { ok: false, reason: "banned" };
-  if (restr.paused) return { ok: false, reason: "paused" };
-  if (restr.cooldownUntil && new Date(restr.cooldownUntil).getTime() > Date.now()) {
-    return { ok: false, reason: "cooldown", until: restr.cooldownUntil };
+  if (!tlBypass) {
+    const restr = await activeRestrictions(opts.userId);
+    if (restr.banned) return { ok: false, reason: "banned" };
+    if (restr.paused) return { ok: false, reason: "paused" };
+    if (restr.cooldownUntil && new Date(restr.cooldownUntil).getTime() > Date.now()) {
+      return { ok: false, reason: "cooldown", until: restr.cooldownUntil };
+    }
   }
 
   const override = await hasActiveOverride(opts.userId);
 
-  if (!override.active) {
+  if (!override.active && !tlBypass) {
     const q = await quotaFor(opts.userId);
     if (q.dailyRemainingMinutes <= 0) {
       return { ok: false, reason: "quota_daily", resetMinutes: minutesUntilNextDay() };
@@ -67,7 +78,7 @@ export async function tryClaim(opts: {
   }
 
   const slotNumber = await findOpenSlotNumber();
-  if (!slotNumber && !override.active) {
+  if (!slotNumber && !override.active && !tlBypass) {
     if (opts.joinQueueIfFull) {
       const existingQ = await db
         .select()
@@ -113,7 +124,9 @@ export async function tryClaim(opts: {
   }
 
   const startedAt = new Date();
-  const slotNum = slotNumber ?? 0; // override slots use 0 — out-of-band capacity
+  // slotNumber 0 = out-of-band capacity (TL bypass or member override).
+  // Members fall through here only when slotNumber is 1..N.
+  const slotNum = tlBypass ? 0 : slotNumber ?? 0;
   const [slot] = await db
     .insert(schema.slots)
     .values({
@@ -164,6 +177,7 @@ export async function tryClaim(opts: {
     action: "slot.claimed",
     actorUserId: opts.userId,
     actorEmail: opts.email,
+    actorRole: opts.role ?? null,
     targetUserId: opts.userId,
     targetEmail: opts.email,
     slotId: slot.id,
@@ -171,6 +185,7 @@ export async function tryClaim(opts: {
       slotNumber: slotNum,
       durationMinutes: desired,
       override: override.active,
+      tlBypass,
       purpose: opts.purpose ?? null,
     },
   });
@@ -178,7 +193,7 @@ export async function tryClaim(opts: {
   return {
     ok: true,
     slot,
-    reason: override.active ? "override" : "allocated",
+    reason: tlBypass ? "tl_bypass" : override.active ? "override" : "allocated",
   };
 }
 

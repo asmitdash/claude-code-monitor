@@ -240,7 +240,12 @@ function LiveTab({
       <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide">
-            Active slots · {data.slots.length} / {cap}
+            Active slots · {data.slots.filter((s) => s.slotNumber > 0).length} / {cap}
+            {data.slots.filter((s) => s.slotNumber === 0).length > 0 && (
+              <span className="ml-2 text-violet-300 normal-case">
+                + {data.slots.filter((s) => s.slotNumber === 0).length} out-of-band
+              </span>
+            )}
           </h2>
           <div className="flex flex-wrap gap-2">
             <button
@@ -280,15 +285,25 @@ function LiveTab({
               >
                 <div className="flex items-baseline justify-between">
                   <div className="text-[11px] uppercase text-neutral-500">Slot {i + 1}</div>
-                  {s && (
+                  {s && !s.isOverride && s.role !== "tl" && (
                     <span className="text-xs text-neutral-400 font-mono">
                       ends in <Countdown to={s.plannedEndAt} />
                     </span>
                   )}
+                  {s && s.role === "tl" && (
+                    <span className="text-xs text-violet-300">unlimited</span>
+                  )}
                 </div>
                 {s ? (
                   <>
-                    <div className="font-medium mt-1">{s.name ?? s.email}</div>
+                    <div className="font-medium mt-1">
+                      {s.name ?? s.email}
+                      {s.role === "tl" && (
+                        <span className="ml-2 text-[10px] px-1 rounded bg-violet-500/20 text-violet-300">
+                          TL
+                        </span>
+                      )}
+                    </div>
                     {s.purpose && (
                       <div className="text-xs text-neutral-400 mt-1">"{s.purpose}"</div>
                     )}
@@ -298,20 +313,28 @@ function LiveTab({
                       <span>· {(s.estimatedTokens / 1000).toFixed(1)}k tok</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5 mt-2">
-                      <button
-                        onClick={() => startTransition(() => void forceEnd(s.id))}
-                        disabled={pending}
-                        className="text-[11px] rounded border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 px-2 py-0.5"
-                      >
-                        Force end
-                      </button>
-                      <button
-                        onClick={() => startTransition(() => void killUser(s.userId))}
-                        disabled={pending}
-                        className="text-[11px] rounded border border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 px-2 py-0.5"
-                      >
-                        Kill + cooldown
-                      </button>
+                      {s.role === "tl" ? (
+                        <span className="text-[11px] text-violet-300 italic">
+                          TL slot — only the owning TL can release it
+                        </span>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => startTransition(() => void forceEnd(s.id))}
+                            disabled={pending}
+                            className="text-[11px] rounded border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 px-2 py-0.5"
+                          >
+                            Force end
+                          </button>
+                          <button
+                            onClick={() => startTransition(() => void killUser(s.userId))}
+                            disabled={pending}
+                            className="text-[11px] rounded border border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 px-2 py-0.5"
+                          >
+                            Kill + cooldown
+                          </button>
+                        </>
+                      )}
                     </div>
                   </>
                 ) : (
@@ -321,6 +344,67 @@ function LiveTab({
             );
           })}
         </div>
+        {data.slots.filter((s) => s.slotNumber === 0).length > 0 && (
+          <div className="mt-4">
+            <div className="text-[11px] uppercase text-neutral-500 mb-2">
+              Out-of-band slots (TL bypass / approved overrides)
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {data.slots
+                .filter((s) => s.slotNumber === 0)
+                .map((s) => (
+                  <div
+                    key={s.id}
+                    className={`rounded-xl p-4 border ${
+                      s.role === "tl"
+                        ? "border-violet-500/30 bg-violet-500/5"
+                        : "border-amber-500/30 bg-amber-500/5"
+                    }`}
+                  >
+                    <div className="flex items-baseline justify-between">
+                      <div className="text-[11px] uppercase text-neutral-500">
+                        {s.role === "tl" ? "TL bypass" : "TL override"}
+                      </div>
+                      {s.role === "tl" ? (
+                        <span className="text-xs text-violet-300">unlimited</span>
+                      ) : (
+                        <span className="text-xs text-neutral-400 font-mono">
+                          ends in <Countdown to={s.plannedEndAt} />
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-medium mt-1">
+                      {s.name ?? s.email}
+                      {s.role === "tl" && (
+                        <span className="ml-2 text-[10px] px-1 rounded bg-violet-500/20 text-violet-300">
+                          TL
+                        </span>
+                      )}
+                    </div>
+                    {s.purpose && (
+                      <div className="text-xs text-neutral-400 mt-1">"{s.purpose}"</div>
+                    )}
+                    <div className="text-[11px] text-neutral-500 mt-1 flex items-center gap-2">
+                      <ActivityChip score={s.activityScore} label={s.activityLabel} />
+                      <span>· {s.toolCallCount} calls</span>
+                      <span>· {(s.estimatedTokens / 1000).toFixed(1)}k tok</span>
+                    </div>
+                    {s.role !== "tl" && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        <button
+                          onClick={() => startTransition(() => void forceEnd(s.id))}
+                          disabled={pending}
+                          className="text-[11px] rounded border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 px-2 py-0.5"
+                        >
+                          Force end
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {data.queue.length > 0 && (
@@ -349,20 +433,30 @@ function LiveTab({
                   <button
                     onClick={() =>
                       startTransition(async () => {
-                        const id = await fetch("/api/admin/queue", {
+                        await fetch("/api/admin/queue", {
                           method: "PATCH",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            queueId: data.queue.find((x) => x.userId === q.userId)?.userId,
-                            action: "promote",
-                          }),
+                          body: JSON.stringify({ queueId: q.id, action: "promote" }),
                         });
-                        // server uses queueId; refetch state via interval
                       })
                     }
                     className="text-xs text-emerald-300 hover:text-emerald-200"
                   >
                     promote
+                  </button>
+                  <button
+                    onClick={() =>
+                      startTransition(async () => {
+                        await fetch("/api/admin/queue", {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ queueId: q.id, action: "remove" }),
+                        });
+                      })
+                    }
+                    className="text-xs text-red-300 hover:text-red-200"
+                  >
+                    remove
                   </button>
                 </div>
               </li>
@@ -414,48 +508,57 @@ function LiveTab({
               </div>
               {p.id !== data.me.id && (
                 <div className="mt-3 pt-3 border-t border-neutral-800 flex flex-wrap gap-1.5">
-                  <button
-                    onClick={() => startTransition(() => void killUser(p.id))}
-                    disabled={pending}
-                    className="text-[11px] rounded border border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 px-2 py-0.5"
-                  >
-                    Kill
-                  </button>
-                  <button
-                    onClick={() => startTransition(() => void unblock(p.id))}
-                    disabled={pending}
-                    className="text-[11px] rounded border border-neutral-700 hover:bg-neutral-800 px-2 py-0.5"
-                  >
-                    Clear flag
-                  </button>
-                  <button
-                    onClick={() => startTransition(() => void restrict(p.id, "pause"))}
-                    disabled={pending}
-                    className="text-[11px] rounded border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 px-2 py-0.5"
-                  >
-                    Pause
-                  </button>
-                  <button
-                    onClick={() => startTransition(() => void restrict(p.id, "ban"))}
-                    disabled={pending}
-                    className="text-[11px] rounded border border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 px-2 py-0.5"
-                  >
-                    Ban
-                  </button>
-                  <button
-                    onClick={() => startTransition(() => void unrestrict(p.id, "pause"))}
-                    disabled={pending}
-                    className="text-[11px] rounded border border-neutral-700 hover:bg-neutral-800 px-2 py-0.5"
-                  >
-                    Unpause
-                  </button>
-                  <button
-                    onClick={() => startTransition(() => void unrestrict(p.id, "ban"))}
-                    disabled={pending}
-                    className="text-[11px] rounded border border-neutral-700 hover:bg-neutral-800 px-2 py-0.5"
-                  >
-                    Unban
-                  </button>
+                  {p.role === "tl" && (
+                    <span className="w-full text-[11px] text-violet-300 italic">
+                      TL — immune to kill / pause / ban / cooldown
+                    </span>
+                  )}
+                  {p.role !== "tl" && (
+                    <>
+                      <button
+                        onClick={() => startTransition(() => void killUser(p.id))}
+                        disabled={pending}
+                        className="text-[11px] rounded border border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 px-2 py-0.5"
+                      >
+                        Kill
+                      </button>
+                      <button
+                        onClick={() => startTransition(() => void unblock(p.id))}
+                        disabled={pending}
+                        className="text-[11px] rounded border border-neutral-700 hover:bg-neutral-800 px-2 py-0.5"
+                      >
+                        Clear flag
+                      </button>
+                      <button
+                        onClick={() => startTransition(() => void restrict(p.id, "pause"))}
+                        disabled={pending}
+                        className="text-[11px] rounded border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 px-2 py-0.5"
+                      >
+                        Pause
+                      </button>
+                      <button
+                        onClick={() => startTransition(() => void restrict(p.id, "ban"))}
+                        disabled={pending}
+                        className="text-[11px] rounded border border-red-500/30 bg-red-500/10 text-red-200 hover:bg-red-500/20 px-2 py-0.5"
+                      >
+                        Ban
+                      </button>
+                      <button
+                        onClick={() => startTransition(() => void unrestrict(p.id, "pause"))}
+                        disabled={pending}
+                        className="text-[11px] rounded border border-neutral-700 hover:bg-neutral-800 px-2 py-0.5"
+                      >
+                        Unpause
+                      </button>
+                      <button
+                        onClick={() => startTransition(() => void unrestrict(p.id, "ban"))}
+                        disabled={pending}
+                        className="text-[11px] rounded border border-neutral-700 hover:bg-neutral-800 px-2 py-0.5"
+                      >
+                        Unban
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => startTransition(() => void impersonate(p.id))}
                     disabled={pending}

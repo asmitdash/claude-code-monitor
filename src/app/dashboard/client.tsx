@@ -23,10 +23,12 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
     return <div className="p-6 text-neutral-500 text-sm">Loading…</div>;
   }
 
-  const slotsBusy = data.slots.length;
+  // Out-of-band slots (slotNumber === 0) don't consume member capacity.
+  const slotsBusy = data.slots.filter((s) => s.slotNumber > 0).length;
   const cap = data.config.maxConcurrentSlots;
   const isMine = !!data.myActive;
   const myQ = data.myQueueEntry;
+  const tlBypass = data.me.tlBypass;
   const queueCanRequest = !isMine && !myQ;
   const queueExceedsCapacity = data.queue.length >= cap;
   const myPendingApproval = data.myApprovals.find((a) => a.status === "pending");
@@ -119,14 +121,17 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
       <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide">
-            Slots · {slotsBusy} / {cap}
+            Slots · {data.slots.filter((s) => s.slotNumber > 0).length} / {cap}
           </h2>
           <span className="text-xs text-neutral-500">
-            {slotsBusy === 0
-              ? "both open"
-              : slotsBusy < cap
-              ? `${cap - slotsBusy} open`
-              : "full"}
+            {(() => {
+              const numbered = data.slots.filter((s) => s.slotNumber > 0).length;
+              return numbered === 0
+                ? "both open"
+                : numbered < cap
+                ? `${cap - numbered} open`
+                : "full";
+            })()}
           </span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -199,8 +204,16 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
         {isMine ? (
           <div className="space-y-3">
             <div className="text-sm text-neutral-300">
-              Slot {data.myActive!.slotNumber} active. Ends in{" "}
-              <Countdown to={data.myActive!.plannedEndAt} />.
+              {data.myActive!.slotNumber === 0
+                ? "TL bypass slot active. "
+                : `Slot ${data.myActive!.slotNumber} active. `}
+              {tlBypass ? (
+                <span className="text-violet-300">Unlimited — release when done.</span>
+              ) : (
+                <>
+                  Ends in <Countdown to={data.myActive!.plannedEndAt} />.
+                </>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -210,20 +223,24 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
               >
                 Done — release slot
               </button>
-              <button
-                onClick={() => startTransition(() => void extend(15))}
-                disabled={pending}
-                className="rounded-md border border-neutral-700 hover:bg-neutral-800 px-3 py-2 text-sm disabled:opacity-50"
-              >
-                +15 min
-              </button>
-              <button
-                onClick={() => startTransition(() => void extend(30))}
-                disabled={pending}
-                className="rounded-md border border-neutral-700 hover:bg-neutral-800 px-3 py-2 text-sm disabled:opacity-50"
-              >
-                +30 min
-              </button>
+              {!tlBypass && (
+                <>
+                  <button
+                    onClick={() => startTransition(() => void extend(15))}
+                    disabled={pending}
+                    className="rounded-md border border-neutral-700 hover:bg-neutral-800 px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    +15 min
+                  </button>
+                  <button
+                    onClick={() => startTransition(() => void extend(30))}
+                    disabled={pending}
+                    className="rounded-md border border-neutral-700 hover:bg-neutral-800 px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    +30 min
+                  </button>
+                </>
+              )}
               {data.queue.length > 0 && (
                 <button
                   onClick={() =>
@@ -281,68 +298,89 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
             )}
           </div>
         ) : queueCanRequest ? (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              {([15, 60, 120] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setDuration(m)}
-                  className={`rounded-md border px-3 py-1.5 text-xs ${
-                    duration === m
-                      ? "border-emerald-400 text-emerald-300 bg-emerald-500/10"
-                      : "border-neutral-700 text-neutral-300 hover:border-neutral-500"
-                  }`}
-                >
-                  {m === 15 ? "Quick (15m)" : m === 60 ? "Normal (1h)" : "Long (2h)"}
-                </button>
-              ))}
-            </div>
-            <input
-              value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
-              placeholder="What are you working on? (optional)"
-              className="w-full rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
-            />
-            {slotsBusy >= cap && (
-              <div className="space-y-2">
-                <input
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Note for active users (e.g. need 5min for one bug)"
-                  className="w-full rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-xs"
-                />
-                <label className="flex items-center gap-2 text-xs text-neutral-400">
-                  <input
-                    type="checkbox"
-                    checked={urgent}
-                    onChange={(e) => setUrgent(e.target.checked)}
-                    className="accent-red-400"
-                  />
-                  Mark urgent (TL sees this flag)
-                </label>
+          tlBypass ? (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm text-violet-200">
+                👑 TL — unlimited access. No queue, no quota, no auto-end.
               </div>
-            )}
-            <button
-              onClick={() => startTransition(() => (slotsBusy >= cap ? void queueUp() : void claim()))}
-              disabled={pending}
-              className={`w-full rounded-md px-4 py-2.5 text-sm font-medium disabled:opacity-50 ${
-                slotsBusy >= cap
-                  ? "bg-amber-400 text-neutral-950 hover:bg-amber-300"
-                  : "bg-emerald-500 text-neutral-950 hover:bg-emerald-400"
-              }`}
-            >
-              {slotsBusy >= cap ? `Join queue (~${data.queue.length + 1})` : "Use Claude Code"}
-            </button>
-            <div className="text-[11px] text-neutral-500">
-              Quota: {Math.round(data.myQuota.dailyUsedMinutes)} /{" "}
-              {data.myQuota.dailyMinutes}m today ·{" "}
-              {Math.round(data.myQuota.weeklyUsedMinutes)} /{" "}
-              {data.myQuota.weeklyMinutes}m this week
-              {data.myQuota.exhausted && (
-                <span className="ml-2 text-amber-400">(quota exhausted)</span>
-              )}
+              <input
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+                placeholder="What are you working on? (optional)"
+                className="w-full rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+              />
+              <button
+                onClick={() => startTransition(() => void claim())}
+                disabled={pending}
+                className="w-full rounded-md bg-violet-500 hover:bg-violet-400 text-neutral-950 px-4 py-2.5 text-sm font-medium disabled:opacity-50"
+              >
+                Use Claude Code (TL bypass)
+              </button>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {([15, 60, 120] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setDuration(m)}
+                    className={`rounded-md border px-3 py-1.5 text-xs ${
+                      duration === m
+                        ? "border-emerald-400 text-emerald-300 bg-emerald-500/10"
+                        : "border-neutral-700 text-neutral-300 hover:border-neutral-500"
+                    }`}
+                  >
+                    {m === 15 ? "Quick (15m)" : m === 60 ? "Normal (1h)" : "Long (2h)"}
+                  </button>
+                ))}
+              </div>
+              <input
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+                placeholder="What are you working on? (optional)"
+                className="w-full rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+              />
+              {slotsBusy >= cap && (
+                <div className="space-y-2">
+                  <input
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="Note for active users (e.g. need 5min for one bug)"
+                    className="w-full rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-xs"
+                  />
+                  <label className="flex items-center gap-2 text-xs text-neutral-400">
+                    <input
+                      type="checkbox"
+                      checked={urgent}
+                      onChange={(e) => setUrgent(e.target.checked)}
+                      className="accent-red-400"
+                    />
+                    Mark urgent (TL sees this flag)
+                  </label>
+                </div>
+              )}
+              <button
+                onClick={() => startTransition(() => (slotsBusy >= cap ? void queueUp() : void claim()))}
+                disabled={pending}
+                className={`w-full rounded-md px-4 py-2.5 text-sm font-medium disabled:opacity-50 ${
+                  slotsBusy >= cap
+                    ? "bg-amber-400 text-neutral-950 hover:bg-amber-300"
+                    : "bg-emerald-500 text-neutral-950 hover:bg-emerald-400"
+                }`}
+              >
+                {slotsBusy >= cap ? `Join queue (~${data.queue.length + 1})` : "Use Claude Code"}
+              </button>
+              <div className="text-[11px] text-neutral-500">
+                Quota: {Math.round(data.myQuota.dailyUsedMinutes)} /{" "}
+                {data.myQuota.dailyMinutes}m today ·{" "}
+                {Math.round(data.myQuota.weeklyUsedMinutes)} /{" "}
+                {data.myQuota.weeklyMinutes}m this week
+                {data.myQuota.exhausted && (
+                  <span className="ml-2 text-amber-400">(quota exhausted)</span>
+                )}
+              </div>
+            </div>
+          )
         ) : null}
 
         {myPendingApproval && (

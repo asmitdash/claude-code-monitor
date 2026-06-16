@@ -7,6 +7,7 @@ import { audit } from "@/lib/audit";
 import { getActiveSlots } from "@/lib/slots";
 import { endSlot } from "@/lib/engine";
 import { getConfig } from "@/lib/config";
+import { isTLBypass } from "@/lib/role";
 
 let lastSweepAt = 0;
 
@@ -37,6 +38,10 @@ export async function runSweep(): Promise<SweepReport> {
   let idleEnded = 0;
   let staleHeartbeatEnded = 0;
   for (const r of active) {
+    // TLs are exempt from automatic lifecycle enforcement. Their slots run
+    // until they release or hand them off; idle/stale/expired don't touch them.
+    if (isTLBypass(r.user.role)) continue;
+
     const planned = new Date(r.slot.plannedEndAt).getTime();
     const last = r.slot.lastActivityAt
       ? new Date(r.slot.lastActivityAt).getTime()

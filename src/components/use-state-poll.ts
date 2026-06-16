@@ -7,6 +7,7 @@ export type SlotInfo = {
   userId: string;
   email: string;
   name: string | null;
+  role: "tl" | "member";
   startedAt: string;
   plannedEndAt: string;
   durationMinutes: number;
@@ -24,6 +25,7 @@ export type SlotInfo = {
 };
 
 export type QueueEntry = {
+  id: string;
   position: number;
   etaMin: number;
   userId: string;
@@ -63,6 +65,7 @@ export type StatePayload = {
     email: string;
     isImpersonating: boolean;
     realActorEmail: string;
+    tlBypass: boolean;
   };
   config: {
     maxConcurrentSlots: number;
@@ -100,6 +103,7 @@ export type StatePayload = {
     dailyRemainingMinutes: number;
     weeklyRemainingMinutes: number;
     exhausted: boolean;
+    unlimited: boolean;
   };
   myOverride: { id: string; expiresAt: string | null } | null;
   myRestriction:

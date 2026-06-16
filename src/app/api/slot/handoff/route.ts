@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
   const decision = await tryClaim({
     userId: target.user.id,
     email: target.user.email,
+    role: target.user.role,
     desiredMinutes: target.item.desiredMinutes,
     purpose: `(handed off by ${me.email})`,
     joinQueueIfFull: false,

@@ -7,6 +7,7 @@ import { eventWeight, tokenGuess, costMicros } from "@/lib/activity";
 import { audit } from "@/lib/audit";
 import { activeRestrictions, hasActiveOverride } from "@/lib/quota";
 import { noteHeartbeat } from "@/lib/engine";
+import { isTLBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
@@ -83,19 +84,24 @@ export async function POST(req: NextRequest) {
     .from(schema.killFlags)
     .where(eq(schema.killFlags.userId, user.id))
     .limit(1);
-  const restr = await activeRestrictions(user.id);
+  const tlBypass = isTLBypass(user.role);
+  const restr = tlBypass
+    ? { paused: false, banned: false, cooldownUntil: null, reason: null }
+    : await activeRestrictions(user.id);
   const override = await hasActiveOverride(user.id);
 
   // Slot enforcement: any tool call that doesn't have an owning slot or override
   // is recorded as an unauthorized attempt and treated as blocked by the server.
+  // TLs are exempt and never count as unauthorized.
   let unauthorized = false;
-  if (!myActive && !override.active && tool) {
+  if (!tlBypass && !myActive && !override.active && tool) {
     unauthorized = true;
     await audit({
       action: "unauthorized.attempt",
       severity: "alert",
       actorUserId: user.id,
       actorEmail: user.email,
+      actorRole: user.role,
       targetUserId: user.id,
       targetEmail: user.email,
       metadata: { source: "ingest", tool, eventType, cwd, model },
@@ -103,20 +109,23 @@ export async function POST(req: NextRequest) {
   }
 
   const blocked =
-    flag[0]?.blocked === true || restr.banned || restr.paused || unauthorized;
+    !tlBypass &&
+    (flag[0]?.blocked === true || restr.banned || restr.paused || unauthorized);
 
   return NextResponse.json({
     ok: true,
     blocked,
-    reason:
-      flag[0]?.reason ??
-      (restr.banned
-        ? "banned"
-        : restr.paused
-        ? "paused by team lead"
-        : unauthorized
-        ? "no active slot — request one in the dashboard"
-        : null),
+    tlBypass,
+    reason: tlBypass
+      ? null
+      : flag[0]?.reason ??
+        (restr.banned
+          ? "banned"
+          : restr.paused
+          ? "paused by team lead"
+          : unauthorized
+          ? "no active slot — request one in the dashboard"
+          : null),
     slot: myActive
       ? {
           plannedEndAt: myActive.slot.plannedEndAt,

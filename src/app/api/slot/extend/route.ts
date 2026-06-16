@@ -5,24 +5,29 @@ import { requireUser } from "@/lib/session-helper";
 import { getActiveSlotForUser, getQueue, plannedEndAt } from "@/lib/slots";
 import { audit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
+import { isTLBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
 // Mid-session extension. If queue is empty → auto-grant. If anyone is queued →
 // requires TL approval (creates a pending approval and the user has to ask).
+// TLs are exempt — they always auto-grant, no cap, no queue-blocking.
 export async function POST(req: NextRequest) {
   const me = await requireUser();
   if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const minutes = Math.min(Math.max(15, Number(body.minutes ?? 30)), 120);
+  const tlBypass = isTLBypass(me.role);
+  const minutes = tlBypass
+    ? Math.max(15, Number(body.minutes ?? 30))
+    : Math.min(Math.max(15, Number(body.minutes ?? 30)), 120);
 
   const active = await getActiveSlotForUser(me.id);
   if (!active) return NextResponse.json({ error: "no_active_slot" }, { status: 404 });
 
   const cfg = await getConfig();
   const totalAfter = active.slot.durationMinutes + active.slot.extendedMinutes + minutes;
-  if (totalAfter > cfg.maxSlotMinutes && me.role !== "tl") {
+  if (!tlBypass && totalAfter > cfg.maxSlotMinutes) {
     return NextResponse.json(
       { error: "exceeds_max_minutes", cap: cfg.maxSlotMinutes },
       { status: 400 },
@@ -30,7 +35,7 @@ export async function POST(req: NextRequest) {
   }
 
   const queue = await getQueue();
-  if (queue.length > 0 && me.role !== "tl") {
+  if (queue.length > 0 && !tlBypass) {
     // Cannot self-grant; create an approval.
     const [a] = await db
       .insert(schema.approvals)

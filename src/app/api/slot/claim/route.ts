@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
   const decision = await tryClaim({
     userId: me.id,
     email: me.email,
+    role: me.role,
     desiredMinutes,
     purpose,
     cwd,

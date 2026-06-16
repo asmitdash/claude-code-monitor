@@ -15,6 +15,7 @@ import { getConfig } from "@/lib/config";
 import { quotaFor, hasActiveOverride, activeRestrictions } from "@/lib/quota";
 import { presenceState, STATE_ICON, STATE_LABEL } from "@/lib/presence-state";
 import { scoreLabel } from "@/lib/activity";
+import { isTLBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
@@ -27,6 +28,7 @@ export async function GET() {
   if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const isTL = me.realActorRole === "tl";
+  const tlBypass = isTLBypass(me.role);
 
   // opportunistic background work
   maybeRunWarnings().catch(() => {});
@@ -40,7 +42,21 @@ export async function GET() {
   const myQ = quotaFor(me.id);
   const myOverride = hasActiveOverride(me.id);
   const myRestr = activeRestrictions(me.id);
-  const [quota, override, restr] = await Promise.all([myQ, myOverride, myRestr]);
+  const [quotaRaw, override, restr] = await Promise.all([myQ, myOverride, myRestr]);
+  // TLs don't have quotas — flag unlimited so the UI hides the meter.
+  // (Use 0/0 for the numeric fields rather than Infinity, which JSON-encodes
+  // to null and trips the existing UI math.)
+  const quota = tlBypass
+    ? {
+        ...quotaRaw,
+        dailyUsedMinutes: 0,
+        weeklyUsedMinutes: 0,
+        dailyRemainingMinutes: 0,
+        weeklyRemainingMinutes: 0,
+        exhausted: false,
+        unlimited: true,
+      }
+    : { ...quotaRaw, unlimited: false };
 
   const usersList = isTL ? await getAllUsers() : [];
 
@@ -240,6 +256,7 @@ export async function GET() {
 
   const queueWithEta = await Promise.all(
     queue.map(async (q, i) => ({
+      id: q.item.id,
       position: i + 1,
       etaMin: await estimateQueueWaitMinutes(i + 1),
       userId: q.user.id,
@@ -259,6 +276,7 @@ export async function GET() {
       email: me.email,
       isImpersonating: me.isImpersonating,
       realActorEmail: me.realActorEmail,
+      tlBypass,
     },
     config: {
       maxConcurrentSlots: cfg.maxConcurrentSlots,
@@ -284,6 +302,7 @@ export async function GET() {
       userId: s.user.id,
       email: s.user.email,
       name: s.user.name,
+      role: s.user.role,
       startedAt: s.slot.startedAt,
       plannedEndAt: s.slot.plannedEndAt,
       durationMinutes: s.slot.durationMinutes,

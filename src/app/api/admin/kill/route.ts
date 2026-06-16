@@ -5,6 +5,7 @@ import { requireTL } from "@/lib/session-helper";
 import { audit } from "@/lib/audit";
 import { endSlot, fulfillQueueIfCapacity } from "@/lib/engine";
 import { getActiveSlots } from "@/lib/slots";
+import { isTLBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,19 @@ export async function POST(req: NextRequest) {
 
   const { userId, reason } = await req.json();
   if (!userId) return NextResponse.json({ error: "missing_user" }, { status: 400 });
+
+  // TLs cannot be kill-flagged — they have unrestricted access by policy.
+  const target = await db
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .limit(1);
+  if (target[0] && isTLBypass(target[0].role)) {
+    return NextResponse.json(
+      { error: "tl_immune", message: "TLs have unrestricted access by policy" },
+      { status: 409 },
+    );
+  }
 
   await db
     .insert(schema.killFlags)

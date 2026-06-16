@@ -55,6 +55,7 @@ export async function PATCH(req: NextRequest) {
       const decision = await tryClaim({
         userId: row.user.id,
         email: row.user.email,
+        role: row.user.role,
         desiredMinutes: row.q.desiredMinutes,
         purpose: `(promoted by ${me.realActorEmail})`,
         joinQueueIfFull: false,

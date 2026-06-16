@@ -4,17 +4,31 @@ import { and, eq } from "drizzle-orm";
 import { requireTL } from "@/lib/session-helper";
 import { audit } from "@/lib/audit";
 import { endSlot } from "@/lib/engine";
+import { isTLBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
 // POST { userId } — full reset for a user: end any active slot, cancel queue,
 // expire pending approvals, deactivate restrictions, clear kill flag.
+// Cannot target other TLs.
 export async function POST(req: NextRequest) {
   const me = await requireTL();
   if (!me) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
   const userId = String(body.userId ?? "");
   if (!userId) return NextResponse.json({ error: "missing_user" }, { status: 400 });
+
+  const target = await db
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .limit(1);
+  if (target[0] && isTLBypass(target[0].role) && target[0].id !== me.realActorId) {
+    return NextResponse.json(
+      { error: "tl_immune", message: "Cannot reset another TL's state" },
+      { status: 409 },
+    );
+  }
 
   const slots = await db
     .select()

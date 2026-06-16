@@ -11,6 +11,7 @@ import { audit } from "@/lib/audit";
 import { activeRestrictions, hasActiveOverride } from "@/lib/quota";
 import { getConfig } from "@/lib/config";
 import { noteHeartbeat } from "@/lib/engine";
+import { isTLBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
@@ -80,21 +81,30 @@ export async function POST(req: NextRequest) {
     .where(eq(schema.killFlags.userId, user.id))
     .limit(1);
 
-  const restr = await activeRestrictions(user.id);
+  const tlBypass = isTLBypass(user.role);
+  const restr = tlBypass
+    ? { paused: false, banned: false, cooldownUntil: null, reason: null }
+    : await activeRestrictions(user.id);
   const override = await hasActiveOverride(user.id);
 
   // Server-side slot enforcement: if user is running Claude (claudeRunning OR
   // claudeOpen) but holds neither a slot nor an active override, log the
-  // unauthorized attempt. The hook still does the actual blocking, but the
-  // server records and exposes this so TLs can act.
+  // unauthorized attempt. TLs are exempt — they have unlimited access and
+  // never count as unauthorized.
   let unauthorized = false;
-  if ((claudeRunning || claudeOpen) && !myActive && !override.active) {
+  if (
+    !tlBypass &&
+    (claudeRunning || claudeOpen) &&
+    !myActive &&
+    !override.active
+  ) {
     unauthorized = true;
     await audit({
       action: "unauthorized.attempt",
       severity: "warn",
       actorUserId: user.id,
       actorEmail: user.email,
+      actorRole: user.role,
       targetUserId: user.id,
       targetEmail: user.email,
       metadata: {
@@ -108,23 +118,26 @@ export async function POST(req: NextRequest) {
   }
 
   const blocked =
-    flag[0]?.blocked === true ||
-    restr.banned ||
-    restr.paused ||
-    (!myActive && !override.active && unauthorized);
+    !tlBypass &&
+    (flag[0]?.blocked === true ||
+      restr.banned ||
+      restr.paused ||
+      (!myActive && !override.active && unauthorized));
 
   return NextResponse.json({
     ok: true,
     blocked,
-    reason:
-      flag[0]?.reason ??
-      (restr.banned
-        ? "banned"
-        : restr.paused
-        ? "paused by team lead"
-        : unauthorized
-        ? "no active slot — request one in the dashboard"
-        : null),
+    tlBypass,
+    reason: tlBypass
+      ? null
+      : flag[0]?.reason ??
+        (restr.banned
+          ? "banned"
+          : restr.paused
+          ? "paused by team lead"
+          : unauthorized
+          ? "no active slot — request one in the dashboard"
+          : null),
     activeUsers: active.map((s) => ({
       email: s.user.email,
       name: s.user.name,

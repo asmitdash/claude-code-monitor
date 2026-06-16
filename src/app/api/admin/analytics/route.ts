@@ -112,14 +112,22 @@ export async function GET(req: NextRequest) {
     expired: approvals.filter((a) => a.status === "expired").length,
   };
 
-  // Slot utilization
-  const allMinutes = slots.reduce(
-    (acc, { slot }) => acc + Math.max(0, ((slot.endedAt ?? new Date()).getTime() - new Date(slot.startedAt).getTime()) / 60_000),
+  // Slot utilization (numbered member slots only — TL bypass slots are
+  // out-of-band capacity and shouldn't pollute the utilization signal).
+  const memberSlotMinutes = slots.reduce(
+    (acc, { slot }) =>
+      slot.slotNumber > 0
+        ? acc +
+          Math.max(
+            0,
+            ((slot.endedAt ?? new Date()).getTime() - new Date(slot.startedAt).getTime()) / 60_000,
+          )
+        : acc,
     0,
   );
-  // Days * 2 slots * 24 hours / 60 = capacity in minutes per slot count; scaled to hours
   const capacityMin = days * 24 * 60 * 2; // 2 = max concurrent slots default; UI may scale
-  const utilization = capacityMin > 0 ? allMinutes / capacityMin : 0;
+  const utilization = capacityMin > 0 ? memberSlotMinutes / capacityMin : 0;
+  const allMinutes = memberSlotMinutes;
 
   // Queue stats
   const queueRows = await db
