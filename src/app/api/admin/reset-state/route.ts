@@ -4,13 +4,13 @@ import { and, eq } from "drizzle-orm";
 import { requireTL } from "@/lib/session-helper";
 import { audit } from "@/lib/audit";
 import { endSlot } from "@/lib/engine";
-import { isTLBypass } from "@/lib/role";
+import { isAdminBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
 // POST { userId } — full reset for a user: end any active slot, cancel queue,
 // expire pending approvals, deactivate restrictions, clear kill flag.
-// Cannot target other TLs.
+// Cannot target other admins.
 export async function POST(req: NextRequest) {
   const me = await requireTL();
   if (!me) return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -23,9 +23,9 @@ export async function POST(req: NextRequest) {
     .from(schema.users)
     .where(eq(schema.users.id, userId))
     .limit(1);
-  if (target[0] && isTLBypass(target[0].role) && target[0].id !== me.realActorId) {
+  if (target[0] && isAdminBypass(target[0].role) && target[0].id !== me.realActorId) {
     return NextResponse.json(
-      { error: "tl_immune", message: "Cannot reset another TL's state" },
+      { error: "admin_immune", message: "Cannot reset another admin's state" },
       { status: 409 },
     );
   }
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
       endedBy: me.realActorEmail,
       actorUserId: me.realActorId,
       actorEmail: me.realActorEmail,
-      actorRole: "tl",
+      actorRole: "admin",
       metadata: { mode: "reset_state" },
     });
   }
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     severity: "warn",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     targetUserId: userId,
   });
   return NextResponse.json({ ok: true });

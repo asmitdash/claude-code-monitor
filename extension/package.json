@@ -2,7 +2,7 @@
   "name": "claude-monitor",
   "displayName": "Claude Monitor",
   "description": "Reports Claude Code activity to your team's Claude Code Monitor dashboard, and enforces the team lead's kill-switch via a Claude Code PreToolUse hook.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "asmitdash",
   "private": true,
   "engines": {
@@ -40,6 +40,10 @@
       {
         "command": "claudeMonitor.requestSlot",
         "title": "Claude Monitor: Request a Claude slot"
+      },
+      {
+        "command": "claudeMonitor.toggleBypassMode",
+        "title": "Claude Monitor: Toggle bypass-permissions mode (timed)"
       }
     ]
   },

@@ -7,7 +7,7 @@ export type SlotInfo = {
   userId: string;
   email: string;
   name: string | null;
-  role: "tl" | "member";
+  role: "admin" | "member";
   startedAt: string;
   plannedEndAt: string;
   durationMinutes: number;
@@ -65,7 +65,7 @@ export type StatePayload = {
     email: string;
     isImpersonating: boolean;
     realActorEmail: string;
-    tlBypass: boolean;
+    adminBypass: boolean;
   };
   config: {
     maxConcurrentSlots: number;

@@ -8,9 +8,11 @@ export default auth((req) => {
 
   const isPublic =
     pathname.startsWith("/login") ||
+    pathname.startsWith("/signup") ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/ingest") ||
     pathname.startsWith("/api/extension") ||
+    pathname.startsWith("/api/invites/validate") ||
     pathname === "/" ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon");
@@ -23,7 +25,7 @@ export default auth((req) => {
     return NextResponse.redirect(url);
   }
 
-  if (pathname.startsWith("/admin") && role !== "tl") {
+  if (pathname.startsWith("/admin") && role !== "admin") {
     const url = req.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);

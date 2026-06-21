@@ -6,12 +6,12 @@ import { cookies } from "next/headers";
 export type SessionActor = {
   id: string;
   email: string;
-  role: "tl" | "member";
+  role: "admin" | "member";
   name: string | null;
   isImpersonating: boolean;
   realActorId: string;
   realActorEmail: string;
-  realActorRole: "tl" | "member";
+  realActorRole: "admin" | "member";
 };
 
 const IMPERSONATE_COOKIE = "ccm_impersonate";
@@ -20,10 +20,10 @@ export async function getActor(): Promise<SessionActor | null> {
   const sess = await auth();
   const me = sess?.user as { id?: string; email?: string; role?: string; name?: string | null } | undefined;
   if (!me?.id || !me.email) return null;
-  const realRole = (me.role === "tl" ? "tl" : "member") as "tl" | "member";
+  const realRole = (me.role === "admin" ? "admin" : "member") as "admin" | "member";
 
   let impersonating: SessionActor | null = null;
-  if (realRole === "tl") {
+  if (realRole === "admin") {
     const c = (await cookies()).get(IMPERSONATE_COOKIE)?.value;
     if (c) {
       const target = await db
@@ -60,12 +60,16 @@ export async function getActor(): Promise<SessionActor | null> {
   };
 }
 
-export async function requireTL() {
+export async function requireAdmin() {
   const a = await getActor();
   if (!a) return null;
-  if (a.realActorRole !== "tl") return null;
+  if (a.realActorRole !== "admin") return null;
   return a;
 }
+
+// Backwards-compat alias for any caller still using the old name. Prefer
+// requireAdmin in new code; this alias will be removed once all callers migrate.
+export const requireTL = requireAdmin;
 
 export async function requireUser() {
   return getActor();

@@ -3,7 +3,7 @@ import { db, schema } from "@/db";
 import { and, eq } from "drizzle-orm";
 import { requireTL } from "@/lib/session-helper";
 import { audit } from "@/lib/audit";
-import { isTLBypass } from "@/lib/role";
+import { isAdminBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
@@ -18,15 +18,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "bad_input" }, { status: 400 });
   }
 
-  // TLs are immune to restrictions — pause/ban/cooldown can only target members.
+  // Admins are immune to restrictions — pause/ban/cooldown can only target members.
   const target = await db
     .select()
     .from(schema.users)
     .where(eq(schema.users.id, userId))
     .limit(1);
-  if (target[0] && isTLBypass(target[0].role)) {
+  if (target[0] && isAdminBypass(target[0].role)) {
     return NextResponse.json(
-      { error: "tl_immune", message: "TLs have unrestricted access by policy" },
+      { error: "admin_immune", message: "Admins have unrestricted access by policy" },
       { status: 409 },
     );
   }
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     severity: type === "ban" ? "alert" : "warn",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     targetUserId: userId,
     metadata: { minutes, reason: body.reason ?? null },
   });
@@ -102,7 +102,7 @@ export async function DELETE(req: NextRequest) {
     action,
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     targetUserId: userId,
     metadata: { type },
   });

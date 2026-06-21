@@ -3,13 +3,14 @@ import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { requireTL } from "@/lib/session-helper";
 import { endSlot, fulfillQueueIfCapacity } from "@/lib/engine";
-import { isTLBypass } from "@/lib/role";
+import { isAdminBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
-// POST { slotId, reason? } — TL force-end without setting kill flag.
-// TL-owned slots cannot be force-ended by another TL — TL access is immune by
-// policy. The owning TL releases their own slot via /api/slot/release.
+// POST { slotId, reason? } — admin force-end without setting kill flag.
+// Admin-owned slots cannot be force-ended by another admin — admin access is
+// immune by policy. The owning admin releases their own slot via
+// /api/slot/release.
 export async function POST(req: NextRequest) {
   const me = await requireTL();
   if (!me) return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -23,9 +24,9 @@ export async function POST(req: NextRequest) {
     .innerJoin(schema.users, eq(schema.slots.userId, schema.users.id))
     .where(eq(schema.slots.id, slotId))
     .limit(1);
-  if (slotOwner[0] && isTLBypass(slotOwner[0].user.role) && slotOwner[0].user.id !== me.realActorId) {
+  if (slotOwner[0] && isAdminBypass(slotOwner[0].user.role) && slotOwner[0].user.id !== me.realActorId) {
     return NextResponse.json(
-      { error: "tl_immune", message: "TL slots can only be released by the owning TL" },
+      { error: "admin_immune", message: "Admin slots can only be released by the owning admin" },
       { status: 409 },
     );
   }
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
     endedBy: me.realActorEmail,
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     metadata: { reason: body.reason ?? null, mode: "force_end_only" },
   });
   await fulfillQueueIfCapacity();

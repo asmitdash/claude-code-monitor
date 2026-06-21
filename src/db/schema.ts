@@ -11,7 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-export const roleEnum = pgEnum("role", ["tl", "member"]);
+export const roleEnum = pgEnum("role", ["admin", "member"]);
 
 export const slotStatusEnum = pgEnum("slot_status", [
   "active",
@@ -306,6 +306,108 @@ export const grants = pgTable(
   }),
 );
 
+// Extension self-update releases. Admin uploads a .vsix; the extension polls
+// `/api/extension/latest`, compares versions, and installs on user consent.
+export const releases = pgTable(
+  "releases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    version: text("version").notNull().unique(),
+    vsixBytes: text("vsix_bytes").notNull(), // base64-encoded .vsix
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    uploadedBy: text("uploaded_by").notNull(),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+    autoUpdateEnabled: boolean("auto_update_enabled").notNull().default(true),
+    notes: text("notes"),
+    isLatest: boolean("is_latest").notNull().default(false),
+  },
+  (t) => ({
+    latestIdx: index("releases_latest_idx").on(t.isLatest),
+    uploadedIdx: index("releases_uploaded_idx").on(t.uploadedAt),
+  }),
+);
+
+// Admin-issued file commands consumed by the extension. The extension polls
+// for unconsumed commands targeting itself, executes (read or write), and
+// uploads results to file_snapshots.
+export const fileCommandKindEnum = pgEnum("file_command_kind", ["read", "write"]);
+export const fileCommandPathEnum = pgEnum("file_command_path", [
+  "memory_md",
+  "claude_md_user",
+  "claude_md_project",
+  "settings_json",
+]);
+
+export const fileCommands = pgTable(
+  "file_commands",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: fileCommandKindEnum("kind").notNull(),
+    filePath: fileCommandPathEnum("file_path").notNull(),
+    payload: text("payload"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    status: text("status").notNull().default("pending"),
+    error: text("error"),
+  },
+  (t) => ({
+    userPendingIdx: index("file_commands_user_pending_idx").on(t.userId, t.consumedAt),
+    createdIdx: index("file_commands_created_idx").on(t.createdAt),
+  }),
+);
+
+export const fileSnapshots = pgTable(
+  "file_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    filePath: fileCommandPathEnum("file_path").notNull(),
+    workspace: text("workspace"),
+    content: text("content").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+    sourceCommandId: uuid("source_command_id").references(() => fileCommands.id, {
+      onDelete: "set null",
+    }),
+  },
+  (t) => ({
+    userPathIdx: index("file_snapshots_user_path_idx").on(t.userId, t.filePath),
+    capturedIdx: index("file_snapshots_captured_idx").on(t.capturedAt),
+  }),
+);
+
+// Single-use, email-locked invite tokens. An admin generates one per teammate;
+// the recipient signs up via the URL and the token is consumed.
+export const invites = pgTable(
+  "invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    token: text("token").notNull().unique(),
+    email: text("email").notNull(),
+    role: roleEnum("role").notNull().default("member"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    consumedByUserId: uuid("consumed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: text("revoked_by"),
+    note: text("note"),
+  },
+  (t) => ({
+    tokenIdx: uniqueIndex("invites_token_idx").on(t.token),
+    emailIdx: index("invites_email_idx").on(t.email),
+    expiresIdx: index("invites_expires_idx").on(t.expiresAt),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type AllowedEmail = typeof allowedEmails.$inferSelect;
 export type Slot = typeof slots.$inferSelect;
@@ -320,3 +422,7 @@ export type QuotaConfig = typeof quotaConfig.$inferSelect;
 export type Broadcast = typeof broadcasts.$inferSelect;
 export type Webhook = typeof webhooks.$inferSelect;
 export type Grant = typeof grants.$inferSelect;
+export type Invite = typeof invites.$inferSelect;
+export type FileCommand = typeof fileCommands.$inferSelect;
+export type FileSnapshot = typeof fileSnapshots.$inferSelect;
+export type Release = typeof releases.$inferSelect;

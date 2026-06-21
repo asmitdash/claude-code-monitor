@@ -18,13 +18,13 @@ export async function POST(req: NextRequest) {
   if (!email || typeof email !== "string") {
     return NextResponse.json({ error: "missing_email" }, { status: 400 });
   }
-  const r = role === "tl" ? "tl" : "member";
+  const r = role === "admin" ? "admin" : "member";
   await addMember(email, r, me.realActorEmail);
   await audit({
     action: "member.added",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     targetEmail: email,
     metadata: { role: r },
   });
@@ -46,7 +46,7 @@ export async function DELETE(req: NextRequest) {
     severity: "warn",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     targetEmail: email,
   });
   return NextResponse.json({ ok: true });

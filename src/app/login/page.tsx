@@ -10,7 +10,7 @@ export default async function LoginPage({
   const session = await auth();
   if (session?.user) {
     const role = (session.user as { role?: string }).role;
-    redirect(role === "tl" ? "/admin" : "/dashboard");
+    redirect(role === "admin" ? "/admin" : "/dashboard");
   }
   const params = await searchParams;
   const error = params.error;

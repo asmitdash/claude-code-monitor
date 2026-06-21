@@ -7,7 +7,7 @@ import { eventWeight, tokenGuess, costMicros } from "@/lib/activity";
 import { audit } from "@/lib/audit";
 import { activeRestrictions, hasActiveOverride } from "@/lib/quota";
 import { noteHeartbeat } from "@/lib/engine";
-import { isTLBypass } from "@/lib/role";
+import { isAdminBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
@@ -84,8 +84,8 @@ export async function POST(req: NextRequest) {
     .from(schema.killFlags)
     .where(eq(schema.killFlags.userId, user.id))
     .limit(1);
-  const tlBypass = isTLBypass(user.role);
-  const restr = tlBypass
+  const adminBypass = isAdminBypass(user.role);
+  const restr = adminBypass
     ? { paused: false, banned: false, cooldownUntil: null, reason: null }
     : await activeRestrictions(user.id);
   const override = await hasActiveOverride(user.id);
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
   // is recorded as an unauthorized attempt and treated as blocked by the server.
   // TLs are exempt and never count as unauthorized.
   let unauthorized = false;
-  if (!tlBypass && !myActive && !override.active && tool) {
+  if (!adminBypass && !myActive && !override.active && tool) {
     unauthorized = true;
     await audit({
       action: "unauthorized.attempt",
@@ -109,14 +109,14 @@ export async function POST(req: NextRequest) {
   }
 
   const blocked =
-    !tlBypass &&
+    !adminBypass &&
     (flag[0]?.blocked === true || restr.banned || restr.paused || unauthorized);
 
   return NextResponse.json({
     ok: true,
     blocked,
-    tlBypass,
-    reason: tlBypass
+    adminBypass,
+    reason: adminBypass
       ? null
       : flag[0]?.reason ??
         (restr.banned

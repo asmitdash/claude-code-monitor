@@ -11,6 +11,9 @@ type Tab =
   | "approvals"
   | "analytics"
   | "members"
+  | "invites"
+  | "files"
+  | "releases"
   | "audit"
   | "config";
 
@@ -44,7 +47,7 @@ export function AdminClient({ apiToken }: { apiToken: string }) {
       {data.me.isImpersonating && (
         <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm text-violet-200 flex items-center justify-between">
           <span>
-            👁 Impersonating <strong>{data.me.email}</strong> as TL{" "}
+            👁 Impersonating <strong>{data.me.email}</strong> as admin{" "}
             {data.me.realActorEmail}
           </span>
           <button
@@ -67,6 +70,9 @@ export function AdminClient({ apiToken }: { apiToken: string }) {
             ["approvals", `Approvals (${data.pendingApprovals.length})`],
             ["analytics", "Analytics"],
             ["members", "Members"],
+            ["invites", "Invites"],
+            ["files", "Files"],
+            ["releases", "Releases"],
             ["audit", "Audit"],
             ["config", "Config"],
           ] as Array<[Tab, string]>
@@ -93,6 +99,9 @@ export function AdminClient({ apiToken }: { apiToken: string }) {
       {tab === "approvals" && <ApprovalsTab data={data} pending={pending} startTransition={startTransition} />}
       {tab === "analytics" && <AnalyticsTab />}
       {tab === "members" && <MembersTab />}
+      {tab === "invites" && <InvitesTab />}
+      {tab === "files" && <FilesTab data={data} />}
+      {tab === "releases" && <ReleasesTab />}
       {tab === "audit" && <AuditTab />}
       {tab === "config" && <ConfigTab />}
 
@@ -285,12 +294,12 @@ function LiveTab({
               >
                 <div className="flex items-baseline justify-between">
                   <div className="text-[11px] uppercase text-neutral-500">Slot {i + 1}</div>
-                  {s && !s.isOverride && s.role !== "tl" && (
+                  {s && !s.isOverride && s.role !== "admin" && (
                     <span className="text-xs text-neutral-400 font-mono">
                       ends in <Countdown to={s.plannedEndAt} />
                     </span>
                   )}
-                  {s && s.role === "tl" && (
+                  {s && s.role === "admin" && (
                     <span className="text-xs text-violet-300">unlimited</span>
                   )}
                 </div>
@@ -298,9 +307,9 @@ function LiveTab({
                   <>
                     <div className="font-medium mt-1">
                       {s.name ?? s.email}
-                      {s.role === "tl" && (
+                      {s.role === "admin" && (
                         <span className="ml-2 text-[10px] px-1 rounded bg-violet-500/20 text-violet-300">
-                          TL
+                          Admin
                         </span>
                       )}
                     </div>
@@ -313,9 +322,9 @@ function LiveTab({
                       <span>· {(s.estimatedTokens / 1000).toFixed(1)}k tok</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5 mt-2">
-                      {s.role === "tl" ? (
+                      {s.role === "admin" ? (
                         <span className="text-[11px] text-violet-300 italic">
-                          TL slot — only the owning TL can release it
+                          Admin slot — only the owning admin can release it
                         </span>
                       ) : (
                         <>
@@ -347,7 +356,7 @@ function LiveTab({
         {data.slots.filter((s) => s.slotNumber === 0).length > 0 && (
           <div className="mt-4">
             <div className="text-[11px] uppercase text-neutral-500 mb-2">
-              Out-of-band slots (TL bypass / approved overrides)
+              Out-of-band slots (admin bypass / approved overrides)
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {data.slots
@@ -356,16 +365,16 @@ function LiveTab({
                   <div
                     key={s.id}
                     className={`rounded-xl p-4 border ${
-                      s.role === "tl"
+                      s.role === "admin"
                         ? "border-violet-500/30 bg-violet-500/5"
                         : "border-amber-500/30 bg-amber-500/5"
                     }`}
                   >
                     <div className="flex items-baseline justify-between">
                       <div className="text-[11px] uppercase text-neutral-500">
-                        {s.role === "tl" ? "TL bypass" : "TL override"}
+                        {s.role === "admin" ? "Admin bypass" : "Admin override"}
                       </div>
-                      {s.role === "tl" ? (
+                      {s.role === "admin" ? (
                         <span className="text-xs text-violet-300">unlimited</span>
                       ) : (
                         <span className="text-xs text-neutral-400 font-mono">
@@ -375,9 +384,9 @@ function LiveTab({
                     </div>
                     <div className="font-medium mt-1">
                       {s.name ?? s.email}
-                      {s.role === "tl" && (
+                      {s.role === "admin" && (
                         <span className="ml-2 text-[10px] px-1 rounded bg-violet-500/20 text-violet-300">
-                          TL
+                          Admin
                         </span>
                       )}
                     </div>
@@ -389,7 +398,7 @@ function LiveTab({
                       <span>· {s.toolCallCount} calls</span>
                       <span>· {(s.estimatedTokens / 1000).toFixed(1)}k tok</span>
                     </div>
-                    {s.role !== "tl" && (
+                    {s.role !== "admin" && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         <button
                           onClick={() => startTransition(() => void forceEnd(s.id))}
@@ -479,9 +488,9 @@ function LiveTab({
                 <div className="min-w-0">
                   <div className="font-medium truncate">
                     {p.name ?? p.email}
-                    {p.role === "tl" && (
+                    {p.role === "admin" && (
                       <span className="ml-2 text-[10px] px-1 rounded bg-emerald-500/20 text-emerald-300">
-                        TL
+                        Admin
                       </span>
                     )}
                     {p.id === data.me.id && (
@@ -508,12 +517,12 @@ function LiveTab({
               </div>
               {p.id !== data.me.id && (
                 <div className="mt-3 pt-3 border-t border-neutral-800 flex flex-wrap gap-1.5">
-                  {p.role === "tl" && (
+                  {p.role === "admin" && (
                     <span className="w-full text-[11px] text-violet-300 italic">
-                      TL — immune to kill / pause / ban / cooldown
+                      Admin — immune to kill / pause / ban / cooldown
                     </span>
                   )}
-                  {p.role !== "tl" && (
+                  {p.role !== "admin" && (
                     <>
                       <button
                         onClick={() => startTransition(() => void killUser(p.id))}
@@ -619,7 +628,7 @@ function ApprovalsTab({
     <div className="space-y-5">
       <section className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-6">
         <h2 className="text-sm font-medium text-violet-300 uppercase tracking-wide mb-3">
-          Pending TL approval requests · {data.pendingApprovals.length}
+          Pending admin approval requests · {data.pendingApprovals.length}
         </h2>
         {data.pendingApprovals.length === 0 ? (
           <div className="text-sm text-neutral-500">No pending requests.</div>
@@ -861,11 +870,11 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-type Member = { email: string; role: "tl" | "member"; addedBy: string | null; addedAt: string };
+type Member = { email: string; role: "admin" | "member"; addedBy: string | null; addedAt: string };
 function MembersTab() {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"tl" | "member">("member");
+  const [role, setRole] = useState<"admin" | "member">("member");
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   async function reload() {
@@ -923,11 +932,11 @@ function MembersTab() {
           />
           <select
             value={role}
-            onChange={(e) => setRole(e.target.value as "tl" | "member")}
+            onChange={(e) => setRole(e.target.value as "admin" | "member")}
             className="rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
           >
             <option value="member">Member</option>
-            <option value="tl">Team Lead</option>
+            <option value="admin">Admin</option>
           </select>
           <button
             onClick={() => startTransition(() => void add())}
@@ -961,12 +970,12 @@ function MembersTab() {
                 <div className="flex items-center gap-3">
                   <span
                     className={`text-[10px] px-1.5 py-0.5 rounded ${
-                      m.role === "tl"
+                      m.role === "admin"
                         ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                         : "bg-neutral-800 text-neutral-300"
                     }`}
                   >
-                    {m.role === "tl" ? "TL" : "Member"}
+                    {m.role === "admin" ? "Admin" : "Member"}
                   </span>
                   <button
                     onClick={() => startTransition(() => void remove(m.email))}
@@ -1206,6 +1215,609 @@ function KillHistory() {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+type Release = {
+  id: string;
+  version: string;
+  sizeBytes: number;
+  uploadedBy: string;
+  uploadedAt: string;
+  autoUpdateEnabled: boolean;
+  notes: string | null;
+  isLatest: boolean;
+};
+
+function ReleasesTab() {
+  const [releases, setReleases] = useState<Release[] | null>(null);
+  const [version, setVersion] = useState("");
+  const [notes, setNotes] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, startTransition] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function reload() {
+    const r = await fetch("/api/admin/releases", { cache: "no-store" });
+    const j = await r.json();
+    setReleases(j.releases ?? []);
+  }
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  async function upload() {
+    setMsg(null);
+    if (!version.trim() || !file) {
+      setMsg("Pick a .vsix file and enter the version.");
+      return;
+    }
+    const buf = await file.arrayBuffer();
+    // Browser-side base64
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const b64 = btoa(binary);
+    const r = await fetch("/api/admin/releases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: version.trim(), vsixBase64: b64, notes: notes.trim() || null }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      setMsg("Upload failed: " + (j.error ?? r.status));
+      return;
+    }
+    setMsg(
+      `Published v${version.trim()}. Connected extensions will prompt within ~5 min.`,
+    );
+    setVersion("");
+    setNotes("");
+    setFile(null);
+    await reload();
+  }
+
+  async function toggle(id: string, enabled: boolean) {
+    await fetch("/api/admin/releases", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, autoUpdateEnabled: enabled }),
+    });
+    await reload();
+  }
+
+  return (
+    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-6">
+      <div>
+        <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-2">
+          Publish a new release
+        </h2>
+        <p className="text-xs text-neutral-500 mb-3">
+          Upload the new <code>.vsix</code>. Connected extensions check for updates every 5 min and prompt the user with a "Update now?" toast — two clicks (Yes → VS Code's Reload prompt) and they're on the new version.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+          <input
+            type="text"
+            placeholder="0.4.0"
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+            className="md:col-span-2 rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm font-mono"
+          />
+          <input
+            type="file"
+            accept=".vsix"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="md:col-span-5 rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+          />
+          <input
+            type="text"
+            placeholder="Release notes (optional)"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="md:col-span-3 rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+          />
+          <button
+            onClick={() => startTransition(() => void upload())}
+            disabled={busy}
+            className="md:col-span-2 rounded-md bg-emerald-500 text-neutral-950 hover:bg-emerald-400 px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            Publish
+          </button>
+        </div>
+        {msg && <div className="text-xs text-neutral-300 mt-2">{msg}</div>}
+      </div>
+
+      <div>
+        <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-3">
+          Releases · {releases?.length ?? 0}
+        </h2>
+        {!releases ? (
+          <div className="text-xs text-neutral-500">Loading…</div>
+        ) : releases.length === 0 ? (
+          <div className="text-xs text-neutral-500">None yet — upload your first .vsix above.</div>
+        ) : (
+          <ul className="divide-y divide-neutral-800">
+            {releases.map((r) => (
+              <li key={r.id} className="py-2.5 flex items-center justify-between text-sm">
+                <div>
+                  <div className="font-mono">
+                    v{r.version}
+                    {r.isLatest && (
+                      <span className="ml-2 text-[10px] px-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        latest
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-neutral-500">
+                    {Math.round(r.sizeBytes / 1024)} KB · uploaded {new Date(r.uploadedAt).toLocaleString()} · by {r.uploadedBy}
+                  </div>
+                  {r.notes && (
+                    <div className="text-[11px] text-neutral-400 italic mt-0.5">{r.notes}</div>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      r.autoUpdateEnabled
+                        ? "bg-emerald-500/10 text-emerald-300"
+                        : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                    }`}
+                  >
+                    {r.autoUpdateEnabled ? "auto-update on" : "auto-update OFF"}
+                  </span>
+                  <button
+                    onClick={() => startTransition(() => void toggle(r.id, !r.autoUpdateEnabled))}
+                    disabled={busy}
+                    className="text-xs text-neutral-500 hover:text-amber-300"
+                  >
+                    {r.autoUpdateEnabled ? "Disable" : "Enable"}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+type FilePathKey = "memory_md" | "claude_md_user" | "claude_md_project" | "settings_json";
+const FILE_PATH_LABELS: Record<FilePathKey, string> = {
+  memory_md: "MEMORY.md (project)",
+  claude_md_user: "CLAUDE.md (user, ~/.claude/)",
+  claude_md_project: "CLAUDE.md (project root)",
+  settings_json: "settings.json (~/.claude/)",
+};
+
+type FileSnapshotRow = {
+  id: string;
+  userId: string;
+  filePath: FilePathKey;
+  workspace: string | null;
+  content: string;
+  capturedAt: string;
+};
+
+type PendingCmd = {
+  id: string;
+  kind: "read" | "write";
+  filePath: FilePathKey;
+  createdAt: string;
+};
+
+function FilesTab({ data }: { data: StatePayload }) {
+  const [userId, setUserId] = useState<string>("");
+  const [filePath, setFilePath] = useState<FilePathKey>("claude_md_user");
+  const [snapshots, setSnapshots] = useState<FileSnapshotRow[]>([]);
+  const [pending, setPending] = useState<PendingCmd[]>([]);
+  const [editor, setEditor] = useState<string>("");
+  const [busy, startTransition] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
+
+  // Pre-pick the first non-self user so the picker isn't blank.
+  useEffect(() => {
+    if (!userId && data.presence.length > 0) {
+      const first = data.presence.find((p) => p.id !== data.me.id) ?? data.presence[0];
+      if (first) setUserId(first.id);
+    }
+  }, [data.presence, data.me.id, userId]);
+
+  async function reload() {
+    if (!userId) return;
+    const r = await fetch(
+      `/api/admin/files/command?userId=${encodeURIComponent(userId)}&filePath=${filePath}`,
+      { cache: "no-store" },
+    );
+    const j = await r.json();
+    setSnapshots(j.snapshots ?? []);
+    setPending(j.pending ?? []);
+    const latest = (j.snapshots ?? [])[0] as FileSnapshotRow | undefined;
+    setEditor(latest?.content ?? "");
+  }
+
+  useEffect(() => {
+    void reload();
+  }, [userId, filePath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function requestRefresh() {
+    if (!userId) return;
+    setMsg(null);
+    const r = await fetch("/api/admin/files/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, kind: "read", filePath }),
+    });
+    if (!r.ok) {
+      setMsg("Failed to queue read command.");
+      return;
+    }
+    setMsg("Read queued — extension will upload on its next heartbeat (≤15s).");
+    await reload();
+  }
+
+  async function pushWrite() {
+    if (!userId) return;
+    setMsg(null);
+    if (filePath === "settings_json") {
+      try {
+        JSON.parse(editor);
+      } catch (e) {
+        setMsg("settings.json must be valid JSON. " + String(e));
+        return;
+      }
+    }
+    const r = await fetch("/api/admin/files/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, kind: "write", filePath, payload: editor }),
+    });
+    if (!r.ok) {
+      setMsg("Failed to queue write.");
+      return;
+    }
+    setMsg("Write queued — applies on the user's next heartbeat (≤15s).");
+    await reload();
+  }
+
+  const latestSnapshot = snapshots[0];
+
+  return (
+    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-4">
+      <div>
+        <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-1">
+          Team file oversight
+        </h2>
+        <p className="text-xs text-neutral-500">
+          View and edit a teammate's CLAUDE.md, MEMORY.md, or Claude Code settings. Edits apply on their machine within ~15s. Members are told this capability exists during sign-in.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+        <select
+          value={userId}
+          onChange={(e) => setUserId(e.target.value)}
+          className="md:col-span-5 rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+        >
+          <option value="">Pick a teammate…</option>
+          {data.presence.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.email}
+              {p.role === "admin" ? " (admin)" : ""}
+              {p.id === data.me.id ? " — you" : ""}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filePath}
+          onChange={(e) => setFilePath(e.target.value as FilePathKey)}
+          className="md:col-span-5 rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+        >
+          {(Object.keys(FILE_PATH_LABELS) as FilePathKey[]).map((k) => (
+            <option key={k} value={k}>
+              {FILE_PATH_LABELS[k]}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => startTransition(() => void requestRefresh())}
+          disabled={busy || !userId}
+          className="md:col-span-2 rounded-md bg-emerald-500 text-neutral-950 hover:bg-emerald-400 px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          Refresh from machine
+        </button>
+      </div>
+
+      {pending.length > 0 && (
+        <div className="text-[11px] text-amber-300">
+          {pending.length} pending command(s) queued — waiting for the extension to pick up.
+        </div>
+      )}
+      {msg && <div className="text-xs text-neutral-300">{msg}</div>}
+
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] text-neutral-500">
+            {latestSnapshot
+              ? `Last captured ${new Date(latestSnapshot.capturedAt).toLocaleString()}${latestSnapshot.workspace ? ` · ${latestSnapshot.workspace}` : ""}`
+              : "No snapshot yet — click Refresh."}
+          </div>
+          <button
+            onClick={() => startTransition(() => void pushWrite())}
+            disabled={busy || !userId || !latestSnapshot}
+            className="rounded-md bg-amber-500/20 text-amber-200 border border-amber-500/30 hover:bg-amber-500/30 px-3 py-1 text-xs disabled:opacity-50"
+            title="Pushes the editor contents to the teammate's machine"
+          >
+            Save → push to machine
+          </button>
+        </div>
+        <textarea
+          value={editor}
+          onChange={(e) => setEditor(e.target.value)}
+          rows={20}
+          spellCheck={false}
+          className="w-full rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-[12px] font-mono leading-relaxed focus:outline-none focus:border-neutral-600"
+          placeholder={
+            latestSnapshot ? "" : "Click Refresh to fetch the current contents from the teammate's machine."
+          }
+        />
+      </div>
+
+      {snapshots.length > 1 && (
+        <div className="border-t border-neutral-800 pt-3">
+          <div className="text-[11px] uppercase text-neutral-500 mb-2">Snapshot history</div>
+          <ul className="text-xs text-neutral-400 space-y-1">
+            {snapshots.slice(1, 10).map((s) => (
+              <li key={s.id} className="flex items-center justify-between">
+                <span>
+                  {new Date(s.capturedAt).toLocaleString()}
+                  {s.workspace && (
+                    <span className="text-neutral-600 ml-2">{s.workspace}</span>
+                  )}
+                </span>
+                <button
+                  onClick={() => setEditor(s.content)}
+                  className="text-[11px] text-emerald-300 hover:underline"
+                >
+                  Load into editor
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+type Invite = {
+  id: string;
+  token: string;
+  email: string;
+  role: "admin" | "member";
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  consumedByUserId: string | null;
+  revokedAt: string | null;
+  revokedBy: string | null;
+  note: string | null;
+  status: "pending" | "consumed" | "expired" | "revoked";
+};
+
+function InvitesTab() {
+  const [invites, setInvites] = useState<Invite[] | null>(null);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"admin" | "member">("member");
+  const [days, setDays] = useState<number>(7);
+  const [note, setNote] = useState("");
+  const [pending, startTransition] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const [justCreated, setJustCreated] = useState<{
+    email: string;
+    url: string;
+  } | null>(null);
+
+  async function reload() {
+    const r = await fetch("/api/admin/invites", { cache: "no-store" });
+    const j = await r.json();
+    setInvites(j.invites ?? []);
+  }
+  useEffect(() => {
+    reload();
+  }, []);
+
+  async function create() {
+    setErr(null);
+    setJustCreated(null);
+    if (!email.trim()) return;
+    const res = await fetch("/api/admin/invites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: email.trim(),
+        role,
+        expiresInDays: days,
+        note: note.trim() || null,
+      }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setErr(j.error ?? "failed");
+      return;
+    }
+    const j = await res.json();
+    const url = `${window.location.origin}/signup?invite=${encodeURIComponent(j.invite.token)}`;
+    setJustCreated({ email: j.invite.email, url });
+    setEmail("");
+    setNote("");
+    setRole("member");
+    setDays(7);
+    await reload();
+  }
+
+  async function revoke(id: string) {
+    setErr(null);
+    const res = await fetch("/api/admin/invites", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setErr(j.error ?? "failed");
+      return;
+    }
+    await reload();
+  }
+
+  function copyUrl(url: string) {
+    navigator.clipboard.writeText(url).catch(() => {});
+  }
+
+  return (
+    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 space-y-6">
+      <div>
+        <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-2">
+          Send invite
+        </h2>
+        <p className="text-xs text-neutral-500 mb-3">
+          Generates a one-time signup link locked to the email below. Share it however you like — it works once and only for that exact email.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+          <input
+            type="email"
+            placeholder="teammate@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="md:col-span-5 rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+          />
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as "admin" | "member")}
+            className="md:col-span-2 rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+          >
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+          </select>
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={days}
+            onChange={(e) => setDays(Math.max(1, Math.min(60, Number(e.target.value) || 7)))}
+            className="md:col-span-2 rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+            title="Days until expiry"
+          />
+          <input
+            type="text"
+            placeholder="Note (optional)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="md:col-span-3 rounded-md bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm"
+          />
+          <button
+            onClick={() => startTransition(() => void create())}
+            disabled={pending}
+            className="md:col-span-12 rounded-md bg-emerald-500 text-neutral-950 hover:bg-emerald-400 px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            Generate invite
+          </button>
+        </div>
+        {err && <div className="text-xs text-red-400 mt-2">{err}</div>}
+        {justCreated && (
+          <div className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs space-y-2">
+            <div className="text-emerald-300">
+              Invite ready for <strong>{justCreated.email}</strong>:
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                readOnly
+                value={justCreated.url}
+                className="flex-1 rounded bg-neutral-950 border border-neutral-800 px-2 py-1.5 text-[11px] font-mono"
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <button
+                onClick={() => copyUrl(justCreated.url)}
+                className="rounded border border-neutral-700 hover:bg-neutral-800 px-2 py-1.5 text-[11px]"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-3">
+          Invites · {invites?.length ?? 0}
+        </h2>
+        {!invites ? (
+          <div className="text-xs text-neutral-500">Loading…</div>
+        ) : invites.length === 0 ? (
+          <div className="text-xs text-neutral-500">None yet.</div>
+        ) : (
+          <ul className="divide-y divide-neutral-800">
+            {invites.map((i) => {
+              const url = `${typeof window !== "undefined" ? window.location.origin : ""}/signup?invite=${encodeURIComponent(i.token)}`;
+              return (
+                <li key={i.id} className="py-2.5 flex items-center justify-between text-sm gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate">{i.email}</div>
+                    <div className="text-[10px] text-neutral-500 flex items-center gap-2 flex-wrap">
+                      <span>by {i.createdBy}</span>
+                      <span>·</span>
+                      <span>{new Date(i.createdAt).toLocaleDateString()}</span>
+                      <span>·</span>
+                      <span>{i.role}</span>
+                      {i.note && (
+                        <>
+                          <span>·</span>
+                          <span className="italic truncate max-w-[200px]">{i.note}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        i.status === "pending"
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                          : i.status === "consumed"
+                          ? "bg-neutral-800 text-neutral-400"
+                          : i.status === "expired"
+                          ? "bg-amber-500/10 text-amber-300"
+                          : "bg-red-500/10 text-red-300"
+                      }`}
+                    >
+                      {i.status}
+                    </span>
+                    {i.status === "pending" && (
+                      <>
+                        <button
+                          onClick={() => copyUrl(url)}
+                          className="text-xs text-neutral-500 hover:text-neutral-200"
+                        >
+                          Copy
+                        </button>
+                        <button
+                          onClick={() => startTransition(() => void revoke(i.id))}
+                          disabled={pending}
+                          className="text-xs text-neutral-500 hover:text-red-400 disabled:opacity-30"
+                        >
+                          Revoke
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }

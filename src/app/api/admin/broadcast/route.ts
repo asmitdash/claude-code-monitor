@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     severity: severity as "info" | "warn" | "alert",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     metadata: { message, minutes },
   });
   return NextResponse.json({ ok: true });
@@ -54,7 +54,7 @@ export async function DELETE() {
     action: "broadcast.cleared",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
   });
   return NextResponse.json({ ok: true });
 }

@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     severity: "info",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     targetUserId: row.user.id,
     targetEmail: row.user.email,
     approvalId: row.a.id,

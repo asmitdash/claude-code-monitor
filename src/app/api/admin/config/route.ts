@@ -47,7 +47,7 @@ export async function PATCH(req: NextRequest) {
     action: "config.updated",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     metadata: { patch },
   });
   return NextResponse.json({ ok: true, config: updated });

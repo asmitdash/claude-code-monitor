@@ -15,7 +15,7 @@ import { getConfig } from "@/lib/config";
 import { quotaFor, hasActiveOverride, activeRestrictions } from "@/lib/quota";
 import { presenceState, STATE_ICON, STATE_LABEL } from "@/lib/presence-state";
 import { scoreLabel } from "@/lib/activity";
-import { isTLBypass } from "@/lib/role";
+import { isAdminBypass } from "@/lib/role";
 
 export const runtime = "nodejs";
 
@@ -27,8 +27,8 @@ export async function GET() {
   const me = await requireUser();
   if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const isTL = me.realActorRole === "tl";
-  const tlBypass = isTLBypass(me.role);
+  const isAdmin = me.realActorRole === "admin";
+  const adminBypass = isAdminBypass(me.role);
 
   // opportunistic background work
   maybeRunWarnings().catch(() => {});
@@ -43,10 +43,10 @@ export async function GET() {
   const myOverride = hasActiveOverride(me.id);
   const myRestr = activeRestrictions(me.id);
   const [quotaRaw, override, restr] = await Promise.all([myQ, myOverride, myRestr]);
-  // TLs don't have quotas — flag unlimited so the UI hides the meter.
+  // Admins don't have quotas — flag unlimited so the UI hides the meter.
   // (Use 0/0 for the numeric fields rather than Infinity, which JSON-encodes
   // to null and trips the existing UI math.)
-  const quota = tlBypass
+  const quota = adminBypass
     ? {
         ...quotaRaw,
         dailyUsedMinutes: 0,
@@ -58,7 +58,7 @@ export async function GET() {
       }
     : { ...quotaRaw, unlimited: false };
 
-  const usersList = isTL ? await getAllUsers() : [];
+  const usersList = isAdmin ? await getAllUsers() : [];
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
@@ -68,7 +68,7 @@ export async function GET() {
     .where(and(eq(schema.slots.userId, me.id), gt(schema.slots.startedAt, sevenDaysAgo)))
     .orderBy(desc(schema.slots.startedAt));
 
-  const allRecentSlots = isTL
+  const allRecentSlots = isAdmin
     ? await db
         .select({ slot: schema.slots, user: schema.users })
         .from(schema.slots)
@@ -102,7 +102,7 @@ export async function GET() {
   }
   const myUsage = bucket(myRecentSlots);
 
-  const allUsage = isTL
+  const allUsage = isAdmin
     ? Object.values(
         allRecentSlots.reduce<
           Record<
@@ -138,7 +138,7 @@ export async function GET() {
   const sixtySecAgo = new Date(Date.now() - 60_000);
   const fiveMinAgo = new Date(Date.now() - cfg.idleWarnMinutes * 60_000);
 
-  const recentEventRows = isTL
+  const recentEventRows = isAdmin
     ? await db
         .select({
           userId: schema.events.userId,
@@ -153,7 +153,7 @@ export async function GET() {
   );
 
   // Each user's last force-ended slot in last 5 minutes (for "ended" state)
-  const recentEndsRows = isTL
+  const recentEndsRows = isAdmin
     ? await db
         .select({
           userId: schema.slots.userId,
@@ -167,7 +167,7 @@ export async function GET() {
     recentEndsRows.map((r) => [r.userId, new Date(r.last)]),
   );
 
-  const overrideUsersRows = isTL
+  const overrideUsersRows = isAdmin
     ? await db
         .select()
         .from(schema.approvals)
@@ -183,7 +183,7 @@ export async function GET() {
       .map((a) => a.userId),
   );
 
-  const presenceArr = isTL
+  const presenceArr = isAdmin
     ? usersList.map((u) => {
         const p = presence.get(u.id) ?? null;
         const lastEvt = recentEventByUser.get(u.id) ?? null;
@@ -230,8 +230,8 @@ export async function GET() {
     .orderBy(desc(schema.broadcasts.createdAt))
     .limit(1);
 
-  // Pending approvals (for TL); my approvals (for member)
-  const pendingApprovals = isTL
+  // Pending approvals (for admin); my approvals (for member)
+  const pendingApprovals = isAdmin
     ? await db
         .select({ a: schema.approvals, user: schema.users })
         .from(schema.approvals)
@@ -276,7 +276,7 @@ export async function GET() {
       email: me.email,
       isImpersonating: me.isImpersonating,
       realActorEmail: me.realActorEmail,
-      tlBypass,
+      adminBypass,
     },
     config: {
       maxConcurrentSlots: cfg.maxConcurrentSlots,

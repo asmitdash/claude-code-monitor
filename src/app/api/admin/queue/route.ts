@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest) {
         severity: "warn",
         actorUserId: me.realActorId,
         actorEmail: me.realActorEmail,
-        actorRole: "tl",
+        actorRole: "admin",
         targetUserId: row.user.id,
         targetEmail: row.user.email,
         queueId,
@@ -64,7 +64,7 @@ export async function PATCH(req: NextRequest) {
         action: "queue.promoted",
         actorUserId: me.realActorId,
         actorEmail: me.realActorEmail,
-        actorRole: "tl",
+        actorRole: "admin",
         targetUserId: row.user.id,
         queueId,
       });
@@ -101,7 +101,7 @@ export async function PATCH(req: NextRequest) {
         action: "queue.position_moved",
         actorUserId: me.realActorId,
         actorEmail: me.realActorEmail,
-        actorRole: "tl",
+        actorRole: "admin",
         targetUserId: row.user.id,
         queueId,
         metadata: { toPosition: target },
@@ -128,7 +128,7 @@ export async function DELETE() {
     severity: "warn",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     metadata: { count: rows.length },
   });
   return NextResponse.json({ ok: true, cleared: rows.length });
@@ -148,7 +148,7 @@ export async function POST() {
     action: "queue.cleared_by_admin",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     metadata: { mode: "purge_completed", count: completed.length, since: dayAgo.toISOString() },
   });
   return NextResponse.json({ ok: true, removed: completed.length });

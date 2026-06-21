@@ -1,10 +1,21 @@
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 
-const TL_EMAILS_ENV = (process.env.TL_EMAILS || "")
+// ADMIN_EMAILS is the new name. TL_EMAILS is supported as a deprecated alias so
+// existing Vercel deployments don't break the moment this code ships. If both
+// are set, ADMIN_EMAILS wins. Drop TL_EMAILS support once every deployment has
+// migrated.
+const ADMIN_EMAILS_ENV = (process.env.ADMIN_EMAILS || process.env.TL_EMAILS || "")
   .split(",")
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);
+
+if (process.env.TL_EMAILS && !process.env.ADMIN_EMAILS) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[allowlist] TL_EMAILS is deprecated; set ADMIN_EMAILS instead. Falling back for now.",
+  );
+}
 
 const MEMBER_EMAILS_ENV = (process.env.MEMBER_EMAILS || "")
   .split(",")
@@ -16,8 +27,8 @@ let bootstrapped = false;
 async function bootstrap() {
   if (bootstrapped) return;
   bootstrapped = true;
-  const seed: Array<{ email: string; role: "tl" | "member" }> = [
-    ...TL_EMAILS_ENV.map((email) => ({ email, role: "tl" as const })),
+  const seed: Array<{ email: string; role: "admin" | "member" }> = [
+    ...ADMIN_EMAILS_ENV.map((email) => ({ email, role: "admin" as const })),
     ...MEMBER_EMAILS_ENV.filter((e) => e !== "placeholder").map((email) => ({
       email,
       role: "member" as const,
@@ -34,7 +45,7 @@ async function bootstrap() {
 export async function isAllowed(email: string | null | undefined): Promise<boolean> {
   if (!email) return false;
   const norm = email.toLowerCase();
-  if (TL_EMAILS_ENV.includes(norm)) return true;
+  if (ADMIN_EMAILS_ENV.includes(norm)) return true;
   await bootstrap();
   const row = await db
     .select()
@@ -44,25 +55,28 @@ export async function isAllowed(email: string | null | undefined): Promise<boole
   return row.length > 0;
 }
 
-export async function roleFor(email: string | null | undefined): Promise<"tl" | "member"> {
+export async function roleFor(email: string | null | undefined): Promise<"admin" | "member"> {
   if (!email) return "member";
   const norm = email.toLowerCase();
-  if (TL_EMAILS_ENV.includes(norm)) return "tl";
+  if (ADMIN_EMAILS_ENV.includes(norm)) return "admin";
   await bootstrap();
   const row = await db
     .select()
     .from(schema.allowedEmails)
     .where(eq(schema.allowedEmails.email, norm))
     .limit(1);
-  return (row[0]?.role as "tl" | "member" | undefined) ?? "member";
+  return (row[0]?.role as "admin" | "member" | undefined) ?? "member";
 }
 
 export async function listMembers() {
   await bootstrap();
-  return db.select().from(schema.allowedEmails).orderBy(schema.allowedEmails.role, schema.allowedEmails.email);
+  return db
+    .select()
+    .from(schema.allowedEmails)
+    .orderBy(schema.allowedEmails.role, schema.allowedEmails.email);
 }
 
-export async function addMember(email: string, role: "tl" | "member", addedBy: string) {
+export async function addMember(email: string, role: "admin" | "member", addedBy: string) {
   const norm = email.toLowerCase().trim();
   await db
     .insert(schema.allowedEmails)
@@ -75,8 +89,8 @@ export async function addMember(email: string, role: "tl" | "member", addedBy: s
 
 export async function removeMember(email: string) {
   const norm = email.toLowerCase().trim();
-  if (TL_EMAILS_ENV.includes(norm)) {
-    throw new Error("cannot remove env-bootstrapped TL");
+  if (ADMIN_EMAILS_ENV.includes(norm)) {
+    throw new Error("cannot remove env-bootstrapped admin");
   }
   await db.delete(schema.allowedEmails).where(eq(schema.allowedEmails.email, norm));
   const user = await db

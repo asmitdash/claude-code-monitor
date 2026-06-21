@@ -53,7 +53,7 @@ export function LoginForm() {
           placeholder="At least 6 characters"
         />
         <p className="text-[10px] text-neutral-500 mt-1">
-          First time? Just type any password — it'll become yours.
+          New teammate? Use the invite link your admin sent you.
         </p>
       </div>
       {err && <div className="text-xs text-red-400">{err}</div>}

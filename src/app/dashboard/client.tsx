@@ -28,7 +28,7 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
   const cap = data.config.maxConcurrentSlots;
   const isMine = !!data.myActive;
   const myQ = data.myQueueEntry;
-  const tlBypass = data.me.tlBypass;
+  const adminBypass = data.me.adminBypass;
   const queueCanRequest = !isMine && !myQ;
   const queueExceedsCapacity = data.queue.length >= cap;
   const myPendingApproval = data.myApprovals.find((a) => a.status === "pending");
@@ -207,7 +207,7 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
               {data.myActive!.slotNumber === 0
                 ? "TL bypass slot active. "
                 : `Slot ${data.myActive!.slotNumber} active. `}
-              {tlBypass ? (
+              {adminBypass ? (
                 <span className="text-violet-300">Unlimited — release when done.</span>
               ) : (
                 <>
@@ -223,7 +223,7 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
               >
                 Done — release slot
               </button>
-              {!tlBypass && (
+              {!adminBypass && (
                 <>
                   <button
                     onClick={() => startTransition(() => void extend(15))}
@@ -298,7 +298,7 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
             )}
           </div>
         ) : queueCanRequest ? (
-          tlBypass ? (
+          adminBypass ? (
             <div className="space-y-3">
               <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm text-violet-200">
                 👑 TL — unlimited access. No queue, no quota, no auto-end.

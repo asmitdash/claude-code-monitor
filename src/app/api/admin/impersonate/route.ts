@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     severity: "warn",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     targetUserId: target[0].id,
     targetEmail: target[0].email,
   });
@@ -48,7 +48,7 @@ export async function DELETE() {
     action: "impersonation.ended",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
   });
   return NextResponse.json({ ok: true });
 }

@@ -47,7 +47,14 @@ export type AuditAction =
   | "impersonation.started"
   | "impersonation.ended"
   | "cron.cleanup_run"
-  | "cron.archive_run";
+  | "cron.archive_run"
+  | "invite.created"
+  | "invite.revoked"
+  | "invite.consumed"
+  | "file.read"
+  | "file.written"
+  | "release.published"
+  | "release.toggled";
 
 export type Severity = "info" | "warn" | "alert";
 

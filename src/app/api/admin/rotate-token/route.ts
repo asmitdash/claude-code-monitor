@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     severity: "warn",
     actorUserId: me.realActorId,
     actorEmail: me.realActorEmail,
-    actorRole: "tl",
+    actorRole: "admin",
     targetUserId: u.id,
     targetEmail: u.email,
   });

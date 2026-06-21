@@ -8,15 +8,35 @@ const TOKEN_KEY = "claudeMonitor.apiToken";
 const KILL_DIR = path.join(os.homedir(), ".claude-monitor");
 const KILL_FLAG = path.join(KILL_DIR, "blocked");
 const HOOK_SCRIPT = path.join(KILL_DIR, "hook.mjs");
+const BYPASS_STATE_PATH = path.join(KILL_DIR, "bypass-state.json");
+const DISCLOSURE_PATH = path.join(KILL_DIR, "disclosure-accepted.json");
 const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
+const CLAUDE_MD_USER = path.join(os.homedir(), ".claude", "CLAUDE.md");
 const SERVER_URL = "https://claude-code-monitor-theta.vercel.app";
-const EXT_VERSION = "0.2.0";
+const EXT_VERSION = "0.3.0";
+
+type BypassState = {
+  expiresAt: string;
+  originalMode: string | null;
+  activatedAt: string;
+};
+
+type FileCommand = {
+  id: string;
+  kind: "read" | "write";
+  filePath: "memory_md" | "claude_md_user" | "claude_md_project" | "settings_json";
+  payload: string | null;
+  createdBy: string;
+  createdAt: string;
+};
 
 let statusBar: vscode.StatusBarItem;
 let heartbeat: ReturnType<typeof setInterval> | null = null;
+let bypassTicker: ReturnType<typeof setInterval> | null = null;
 let lastBlocked = false;
 let claudeProcessSeen = false;
 let windowFocused = true;
+let bypassActive = false;
 
 function getServerUrl(): string {
   return SERVER_URL;
@@ -60,9 +80,30 @@ function detectClaudeRunning(): boolean {
 }
 
 function setStatus(text: string, color?: string, tooltip?: string) {
+  // When bypass is active, the bypass renderer owns the status bar.
+  if (bypassActive) {
+    renderBypassStatus();
+    return;
+  }
   statusBar.text = text;
   statusBar.tooltip = tooltip ?? text;
   statusBar.color = color;
+  statusBar.backgroundColor = undefined;
+  statusBar.command = "claudeMonitor.openDashboard";
+}
+
+function renderBypassStatus() {
+  const state = readBypassState();
+  if (!state) {
+    bypassActive = false;
+    return;
+  }
+  const remaining = formatRemaining(state.expiresAt);
+  statusBar.text = `$(warning) BYPASS ${remaining}`;
+  statusBar.tooltip = `Permission prompts bypassed. Click to cancel or extend. Reverts at ${new Date(state.expiresAt).toLocaleTimeString()}.`;
+  statusBar.color = "#ffffff";
+  statusBar.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+  statusBar.command = "claudeMonitor.toggleBypassMode";
 }
 
 async function writeKillFlag(reason: string) {
@@ -73,6 +114,417 @@ async function writeKillFlag(reason: string) {
 async function clearKillFlag() {
   if (fs.existsSync(KILL_FLAG)) fs.unlinkSync(KILL_FLAG);
 }
+
+function readSettings(): Record<string, unknown> {
+  if (!fs.existsSync(SETTINGS_PATH)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function writeSettings(settings: Record<string, unknown>) {
+  const settingsDir = path.dirname(SETTINGS_PATH);
+  fs.mkdirSync(settingsDir, { recursive: true });
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+}
+
+function readBypassState(): BypassState | null {
+  if (!fs.existsSync(BYPASS_STATE_PATH)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(BYPASS_STATE_PATH, "utf-8")) as BypassState;
+  } catch {
+    return null;
+  }
+}
+
+function writeBypassState(state: BypassState) {
+  fs.mkdirSync(KILL_DIR, { recursive: true });
+  fs.writeFileSync(BYPASS_STATE_PATH, JSON.stringify(state, null, 2));
+}
+
+function clearBypassState() {
+  if (fs.existsSync(BYPASS_STATE_PATH)) fs.unlinkSync(BYPASS_STATE_PATH);
+}
+
+async function activateBypass(durationMinutes: number) {
+  const settings = readSettings();
+  const permissions = (settings.permissions as Record<string, unknown> | undefined) ?? {};
+  const currentMode = permissions.defaultMode;
+  const originalMode = typeof currentMode === "string" ? currentMode : null;
+
+  // Don't capture "bypassPermissions" as the original — that would turn revert
+  // into a no-op if the user toggles while already bypassed via some other path.
+  const safeOriginal = originalMode === "bypassPermissions" ? null : originalMode;
+
+  permissions.defaultMode = "bypassPermissions";
+  settings.permissions = permissions;
+  writeSettings(settings);
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + durationMinutes * 60_000);
+  writeBypassState({
+    expiresAt: expiresAt.toISOString(),
+    originalMode: safeOriginal,
+    activatedAt: now.toISOString(),
+  });
+  bypassActive = true;
+}
+
+async function revertBypass() {
+  const state = readBypassState();
+  const settings = readSettings();
+  const permissions = (settings.permissions as Record<string, unknown> | undefined) ?? {};
+
+  // Only flip if we still own the bypass — never overwrite a manual change.
+  if (permissions.defaultMode === "bypassPermissions") {
+    if (state && state.originalMode !== null) {
+      permissions.defaultMode = state.originalMode;
+    } else {
+      delete permissions.defaultMode;
+    }
+    settings.permissions = permissions;
+    writeSettings(settings);
+  }
+
+  clearBypassState();
+  bypassActive = false;
+}
+
+async function checkBypassExpiry() {
+  const state = readBypassState();
+  if (!state) {
+    bypassActive = false;
+    return;
+  }
+  bypassActive = true;
+  const expiresAt = new Date(state.expiresAt).getTime();
+  if (Number.isNaN(expiresAt) || expiresAt <= Date.now()) {
+    await revertBypass();
+  }
+}
+
+function formatRemaining(expiresAtIso: string): string {
+  const remainMs = new Date(expiresAtIso).getTime() - Date.now();
+  if (Number.isNaN(remainMs) || remainMs <= 0) return "0:00";
+  const totalSec = Math.floor(remainMs / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+// ---------- Admin file access (disclosed) ----------
+
+function disclosureAccepted(): boolean {
+  if (!fs.existsSync(DISCLOSURE_PATH)) return false;
+  try {
+    const j = JSON.parse(fs.readFileSync(DISCLOSURE_PATH, "utf-8"));
+    return Boolean(j?.acceptedAt);
+  } catch {
+    return false;
+  }
+}
+
+function recordDisclosure() {
+  fs.mkdirSync(KILL_DIR, { recursive: true });
+  fs.writeFileSync(
+    DISCLOSURE_PATH,
+    JSON.stringify(
+      { acceptedAt: new Date().toISOString(), version: EXT_VERSION },
+      null,
+      2,
+    ),
+  );
+}
+
+async function ensureDisclosureAccepted(): Promise<boolean> {
+  if (disclosureAccepted()) return true;
+  const choice = await vscode.window.showWarningMessage(
+    "Claude Monitor: your team admin has access to your CLAUDE.md, MEMORY.md, and Claude Code settings.json on this machine for team-policy oversight. They can view and edit these files via the dashboard. By signing in, you accept this. (Bypass-permissions toggle, kill-switch, and presence reporting are unaffected.)",
+    { modal: true },
+    "Accept and continue",
+    "Cancel",
+  );
+  if (choice === "Accept and continue") {
+    recordDisclosure();
+    return true;
+  }
+  return false;
+}
+
+function projectClaudeMdPath(): string | null {
+  const ws = vscode.workspace.workspaceFolders?.[0];
+  if (!ws) return null;
+  return path.join(ws.uri.fsPath, "CLAUDE.md");
+}
+
+function sanitizedCwdSegment(): string | null {
+  const ws = vscode.workspace.workspaceFolders?.[0];
+  if (!ws) return null;
+  // Mirror Claude Code's per-project memory directory naming: drive letter
+  // becomes lowercase, all separators and colons become single hyphens.
+  return ws.uri.fsPath.replace(/[\\/:]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+}
+
+function projectMemoryMdPath(): string | null {
+  const seg = sanitizedCwdSegment();
+  if (!seg) return null;
+  return path.join(os.homedir(), ".claude", "projects", seg, "memory", "MEMORY.md");
+}
+
+function resolveFilePath(
+  kind: FileCommand["filePath"],
+): { absPath: string | null; workspace: string | null } {
+  const ws = vscode.workspace.workspaceFolders?.[0];
+  switch (kind) {
+    case "settings_json":
+      return { absPath: SETTINGS_PATH, workspace: null };
+    case "claude_md_user":
+      return { absPath: CLAUDE_MD_USER, workspace: null };
+    case "claude_md_project":
+      return { absPath: projectClaudeMdPath(), workspace: ws?.uri.fsPath ?? null };
+    case "memory_md":
+      return { absPath: projectMemoryMdPath(), workspace: ws?.uri.fsPath ?? null };
+    default:
+      return { absPath: null, workspace: null };
+  }
+}
+
+function deepMergeJson(target: Record<string, unknown>, patch: Record<string, unknown>) {
+  for (const [k, v] of Object.entries(patch)) {
+    if (
+      v &&
+      typeof v === "object" &&
+      !Array.isArray(v) &&
+      target[k] &&
+      typeof target[k] === "object" &&
+      !Array.isArray(target[k])
+    ) {
+      deepMergeJson(target[k] as Record<string, unknown>, v as Record<string, unknown>);
+    } else {
+      target[k] = v;
+    }
+  }
+}
+
+async function executeFileCommand(
+  cmd: FileCommand,
+  ctx: vscode.ExtensionContext,
+): Promise<void> {
+  const url = getServerUrl();
+  const token = await getToken(ctx);
+  if (!url || !token) return;
+
+  const { absPath, workspace } = resolveFilePath(cmd.filePath);
+
+  async function reportSnapshot(args: {
+    content: string | null;
+    error: string | null;
+  }) {
+    try {
+      await fetch(`${url}/api/extension/files/snapshot`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          commandId: cmd.id,
+          filePath: cmd.filePath,
+          workspace,
+          content: args.content,
+          error: args.error,
+        }),
+      });
+    } catch {
+      // ack failures will retry on next poll only if the command stays unconsumed
+      // — but the server marks it consumed once snapshot lands, so this is best-effort
+    }
+  }
+
+  if (!absPath) {
+    await reportSnapshot({
+      content: null,
+      error: "no_workspace_open_for_project_file",
+    });
+    return;
+  }
+
+  if (cmd.kind === "read") {
+    try {
+      const content = fs.existsSync(absPath) ? fs.readFileSync(absPath, "utf-8") : "";
+      await reportSnapshot({ content, error: null });
+    } catch (e) {
+      await reportSnapshot({ content: null, error: String(e).slice(0, 1000) });
+    }
+    return;
+  }
+
+  // write — special-case settings.json with a deep merge so unknown top-level
+  // keys are preserved. CLAUDE.md / MEMORY.md are plain markdown, full
+  // overwrite.
+  try {
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    if (cmd.filePath === "settings_json") {
+      let current: Record<string, unknown> = {};
+      if (fs.existsSync(absPath)) {
+        try {
+          current = JSON.parse(fs.readFileSync(absPath, "utf-8"));
+        } catch {
+          current = {};
+        }
+      }
+      let patch: Record<string, unknown> = {};
+      try {
+        patch = JSON.parse(cmd.payload ?? "{}");
+      } catch (e) {
+        await reportSnapshot({
+          content: null,
+          error: "settings_payload_not_json: " + String(e),
+        });
+        return;
+      }
+      deepMergeJson(current, patch);
+      fs.writeFileSync(absPath, JSON.stringify(current, null, 2));
+      await reportSnapshot({
+        content: fs.readFileSync(absPath, "utf-8"),
+        error: null,
+      });
+    } else {
+      fs.writeFileSync(absPath, cmd.payload ?? "");
+      await reportSnapshot({
+        content: cmd.payload ?? "",
+        error: null,
+      });
+    }
+  } catch (e) {
+    await reportSnapshot({ content: null, error: String(e).slice(0, 1000) });
+  }
+}
+
+async function pollFileCommands(ctx: vscode.ExtensionContext) {
+  if (!disclosureAccepted()) return; // no commands fetched until user accepts
+  const url = getServerUrl();
+  const token = await getToken(ctx);
+  if (!url || !token) return;
+  try {
+    const r = await fetch(`${url}/api/extension/files/poll`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) return;
+    const j = (await r.json()) as { commands?: FileCommand[] };
+    for (const cmd of j.commands ?? []) {
+      await executeFileCommand(cmd, ctx);
+    }
+  } catch {
+    // best-effort — next heartbeat retries
+  }
+}
+
+// ---------- end admin file access ----------
+
+// ---------- Self-update ----------
+
+const UPDATE_DISMISSED_KEY = "claudeMonitor.dismissedUpdateVersion";
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split(/[.\-+]/).map((s) => Number(s) || 0);
+  const pb = b.split(/[.\-+]/).map((s) => Number(s) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return 1;
+    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return -1;
+  }
+  return 0;
+}
+
+let updatePromptInFlight = false;
+
+async function checkForUpdates(ctx: vscode.ExtensionContext) {
+  if (updatePromptInFlight) return;
+  const url = getServerUrl();
+  if (!url) return;
+  type Manifest = {
+    ok: boolean;
+    version?: string;
+    autoUpdateEnabled?: boolean;
+    vsixUrl?: string;
+    sizeBytes?: number;
+  };
+  let manifest: Manifest | null = null;
+  try {
+    const r = await fetch(`${url}/api/extension/latest`);
+    if (!r.ok) return;
+    manifest = (await r.json()) as Manifest;
+  } catch {
+    return;
+  }
+  if (!manifest?.ok || !manifest.version || !manifest.vsixUrl) return;
+  if (manifest.autoUpdateEnabled === false) return;
+  if (compareSemver(manifest.version, EXT_VERSION) <= 0) return;
+
+  const dismissed = ctx.globalState.get<string>(UPDATE_DISMISSED_KEY);
+  if (dismissed === manifest.version) return;
+
+  updatePromptInFlight = true;
+  try {
+    const choice = await vscode.window.showInformationMessage(
+      `Claude Monitor v${manifest.version} is available (you're on v${EXT_VERSION}). Install now? VS Code will prompt you to reload after install.`,
+      "Update now",
+      "Later",
+    );
+    if (choice === "Later" || !choice) {
+      await ctx.globalState.update(UPDATE_DISMISSED_KEY, manifest.version);
+      return;
+    }
+    if (choice === "Update now") {
+      await runSelfUpdate(url + manifest.vsixUrl, manifest.version);
+    }
+  } finally {
+    updatePromptInFlight = false;
+  }
+}
+
+async function runSelfUpdate(vsixUrl: string, version: string) {
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Downloading Claude Monitor v${version}…` },
+    async (progress) => {
+      progress.report({ increment: 0 });
+      let buf: Buffer;
+      try {
+        const res = await fetch(vsixUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const arr = new Uint8Array(await res.arrayBuffer());
+        buf = Buffer.from(arr);
+      } catch (e) {
+        vscode.window.showErrorMessage(`Claude Monitor: download failed (${e}). Try again later.`);
+        return;
+      }
+      progress.report({ increment: 50, message: "Installing…" });
+      const tmpPath = path.join(os.tmpdir(), `claude-monitor-${version}.vsix`);
+      try {
+        fs.writeFileSync(tmpPath, buf);
+        await vscode.commands.executeCommand(
+          "workbench.extensions.installExtension",
+          vscode.Uri.file(tmpPath),
+        );
+        progress.report({ increment: 100, message: "Done — reload to apply." });
+      } catch (e) {
+        vscode.window.showErrorMessage(`Claude Monitor: install failed (${e}).`);
+        return;
+      } finally {
+        try {
+          fs.unlinkSync(tmpPath);
+        } catch {}
+      }
+    },
+  );
+}
+
+// ---------- end self-update ----------
 
 function killProcessesByName(names: string[]): Promise<void> {
   return new Promise((resolve) => {
@@ -350,6 +802,13 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   ctx.subscriptions.push(
     vscode.commands.registerCommand("claudeMonitor.signIn", async () => {
+      const accepted = await ensureDisclosureAccepted();
+      if (!accepted) {
+        vscode.window.showInformationMessage(
+          "Claude Monitor: sign-in cancelled — admin file access disclosure not accepted.",
+        );
+        return;
+      }
       const token = await vscode.window.showInputBox({
         prompt: `Paste your API token from ${SERVER_URL}/admin (Extension API token card)`,
         password: true,
@@ -393,6 +852,79 @@ export async function activate(ctx: vscode.ExtensionContext) {
       const url = getServerUrl();
       vscode.env.openExternal(vscode.Uri.parse(`${url}/dashboard`));
     }),
+    vscode.commands.registerCommand("claudeMonitor.toggleBypassMode", async () => {
+      const state = readBypassState();
+      if (state) {
+        const remaining = formatRemaining(state.expiresAt);
+        const choice = await vscode.window.showQuickPick(
+          [
+            { label: "$(close) Cancel bypass now", value: "cancel" },
+            { label: "$(add) Extend by 15 min", value: "ext-15" },
+            { label: "$(add) Extend by 1 hour", value: "ext-60" },
+            { label: "$(info) Keep active", value: "keep" },
+          ],
+          {
+            placeHolder: `Bypass active — ${remaining} remaining. Reverts to "${state.originalMode ?? "(absent)"}".`,
+            ignoreFocusOut: true,
+          },
+        );
+        if (!choice || choice.value === "keep") return;
+        if (choice.value === "cancel") {
+          await revertBypass();
+          renderBypassStatus();
+          void poll(ctx);
+          vscode.window.showInformationMessage("Claude Monitor: bypass mode cancelled.");
+          return;
+        }
+        const extendMin = choice.value === "ext-15" ? 15 : 60;
+        const newExpires = new Date(new Date(state.expiresAt).getTime() + extendMin * 60_000);
+        writeBypassState({ ...state, expiresAt: newExpires.toISOString() });
+        renderBypassStatus();
+        vscode.window.showInformationMessage(
+          `Claude Monitor: bypass extended by ${extendMin} min.`,
+        );
+        return;
+      }
+
+      const choice = await vscode.window.showQuickPick(
+        [
+          { label: "$(clock) 15 minutes", minutes: 15 },
+          { label: "$(clock) 1 hour", minutes: 60 },
+          { label: "$(clock) 2 hours", minutes: 120 },
+          { label: "$(clock) 4 hours", minutes: 240 },
+          { label: "$(edit) Custom (minutes)…", minutes: -1 },
+        ],
+        {
+          placeHolder: "Bypass permission prompts for how long?",
+          ignoreFocusOut: true,
+        },
+      );
+      if (!choice) return;
+
+      let minutes = choice.minutes;
+      if (minutes === -1) {
+        const input = await vscode.window.showInputBox({
+          prompt: "Bypass duration in minutes (1–1440)",
+          ignoreFocusOut: true,
+          validateInput: (v) => {
+            const n = Number(v);
+            if (!Number.isFinite(n) || !Number.isInteger(n)) return "Enter a whole number";
+            if (n < 1) return "Must be at least 1";
+            if (n > 1440) return "Max 24 hours (1440 min)";
+            return null;
+          },
+        });
+        if (!input) return;
+        minutes = Number(input);
+      }
+
+      await activateBypass(minutes);
+      renderBypassStatus();
+      const expiresAt = new Date(Date.now() + minutes * 60_000);
+      vscode.window.showWarningMessage(
+        `Claude Monitor: BYPASS active for ${minutes} min. Reverts at ${expiresAt.toLocaleTimeString()}.`,
+      );
+    }),
   );
 
   ctx.subscriptions.push(
@@ -413,6 +945,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   await writeTokenFileFromSecret(ctx);
 
+  // Bypass-mode crash recovery: if VSCode was killed mid-bypass and the timer
+  // has since elapsed, revert immediately on activation.
+  await checkBypassExpiry();
+
   const token = await getToken(ctx);
   if (!token) {
     vscode.window
@@ -427,15 +963,33 @@ export async function activate(ctx: vscode.ExtensionContext) {
     await ensureHookInstalled();
   }
 
-  heartbeat = setInterval(() => void poll(ctx), 10_000);
+  let lastUpdateCheck = 0;
+  heartbeat = setInterval(async () => {
+    await checkBypassExpiry();
+    if (bypassActive) renderBypassStatus();
+    await poll(ctx);
+    await pollFileCommands(ctx);
+    // Throttle update checks — every 5 minutes is plenty.
+    const now = Date.now();
+    if (now - lastUpdateCheck > 5 * 60_000) {
+      lastUpdateCheck = now;
+      await checkForUpdates(ctx);
+    }
+  }, 10_000);
+  bypassTicker = setInterval(() => {
+    if (bypassActive) renderBypassStatus();
+  }, 1_000);
   ctx.subscriptions.push({
     dispose: () => {
       if (heartbeat) clearInterval(heartbeat);
+      if (bypassTicker) clearInterval(bypassTicker);
     },
   });
+  if (bypassActive) renderBypassStatus();
   void poll(ctx);
 }
 
 export function deactivate() {
   if (heartbeat) clearInterval(heartbeat);
+  if (bypassTicker) clearInterval(bypassTicker);
 }
