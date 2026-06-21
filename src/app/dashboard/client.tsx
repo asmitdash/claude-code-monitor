@@ -16,7 +16,23 @@ type ReleaseManifest = {
   notes?: string | null;
 };
 
-function ExtensionUpdateBanner() {
+// Compare two semver-ish strings. Returns 1 if a > b, -1 if a < b, 0 if equal.
+// Handles trailing prerelease tags loosely (treats them as 0s).
+function cmpSemver(a: string, b: string): number {
+  const pa = a.split(/[.\-+]/).map((s) => Number(s) || 0);
+  const pb = b.split(/[.\-+]/).map((s) => Number(s) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return 1;
+    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return -1;
+  }
+  return 0;
+}
+
+function ExtensionUpdateBanner({
+  installedVersion,
+}: {
+  installedVersion: string | null;
+}) {
   const [latest, setLatest] = useState<ReleaseManifest | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
 
@@ -39,6 +55,16 @@ function ExtensionUpdateBanner() {
   }, []);
 
   if (!latest?.version) return null;
+
+  // Auto-hide once the user's reporting extension version is at-or-above latest.
+  // The extension reports its version on every 10s heartbeat, so this banner
+  // will disappear within ~10s of a successful update + reload — no manual
+  // dismiss needed. If installedVersion is null (extension not signed in or
+  // never reported), fall through to the dismissed-localStorage check.
+  if (installedVersion && cmpSemver(installedVersion, latest.version) >= 0) {
+    return null;
+  }
+
   if (dismissed === latest.version) return null;
 
   function dismiss() {
@@ -54,6 +80,11 @@ function ExtensionUpdateBanner() {
       <div className="min-w-0">
         <div className="font-medium">
           🚀 Claude Monitor extension v{latest.version} is available
+          {installedVersion && (
+            <span className="text-xs text-emerald-200/60 font-normal ml-2">
+              (you're on v{installedVersion})
+            </span>
+          )}
         </div>
         <div className="text-xs text-emerald-200/80 mt-0.5">
           {latest.notes ?? "New extension build available."}
@@ -63,7 +94,7 @@ function ExtensionUpdateBanner() {
             </span>
           )}
           <span className="block text-emerald-300/60 mt-1">
-            After download: <code className="font-mono">code --install-extension &lt;file&gt;</code> then reload VS Code. Future updates will auto-prompt from inside the editor.
+            After download: <code className="font-mono">code --install-extension &lt;file&gt;</code> then reload VS Code. This banner disappears automatically once your extension reports the new version. Future updates will auto-prompt from inside the editor.
           </span>
         </div>
       </div>
@@ -179,7 +210,7 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
 
   return (
     <main className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-      <ExtensionUpdateBanner />
+      <ExtensionUpdateBanner installedVersion={data.me.extensionVersion ?? null} />
       {data.banner && (
         <div
           className={`rounded-xl border px-4 py-2.5 text-sm ${

@@ -66,6 +66,7 @@ export type StatePayload = {
     isImpersonating: boolean;
     realActorEmail: string;
     adminBypass: boolean;
+    extensionVersion: string | null;
   };
   config: {
     maxConcurrentSlots: number;

@@ -269,6 +269,7 @@ export async function GET() {
     })),
   );
 
+  const myPresence = presence.get(me.id) ?? null;
   return NextResponse.json({
     me: {
       id: me.id,
@@ -277,6 +278,7 @@ export async function GET() {
       isImpersonating: me.isImpersonating,
       realActorEmail: me.realActorEmail,
       adminBypass,
+      extensionVersion: myPresence?.extensionVersion ?? null,
     },
     config: {
       maxConcurrentSlots: cfg.maxConcurrentSlots,
