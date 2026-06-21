@@ -1,9 +1,90 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useStatePoll } from "@/components/use-state-poll";
 import { UsageChart } from "@/components/usage-chart";
 import { Countdown } from "@/components/countdown";
+
+const DOWNLOAD_URL = "/api/extension/latest/download";
+const DISMISSED_KEY = "ccm.extension.dismissedVersion";
+
+type ReleaseManifest = {
+  ok: boolean;
+  version?: string;
+  sizeBytes?: number;
+  uploadedAt?: string;
+  notes?: string | null;
+};
+
+function ExtensionUpdateBanner() {
+  const [latest, setLatest] = useState<ReleaseManifest | null>(null);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      setDismissed(localStorage.getItem(DISMISSED_KEY));
+    } catch {}
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/extension/latest", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as ReleaseManifest;
+        if (!cancelled && j.ok && j.version) setLatest(j);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!latest?.version) return null;
+  if (dismissed === latest.version) return null;
+
+  function dismiss() {
+    if (!latest?.version) return;
+    try {
+      localStorage.setItem(DISMISSED_KEY, latest.version);
+    } catch {}
+    setDismissed(latest.version);
+  }
+
+  return (
+    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100 flex flex-wrap items-center gap-3 justify-between">
+      <div className="min-w-0">
+        <div className="font-medium">
+          🚀 Claude Monitor extension v{latest.version} is available
+        </div>
+        <div className="text-xs text-emerald-200/80 mt-0.5">
+          {latest.notes ?? "New extension build available."}
+          {typeof latest.sizeBytes === "number" && (
+            <span className="text-emerald-300/60 ml-2">
+              ({Math.round(latest.sizeBytes / 1024)} KB)
+            </span>
+          )}
+          <span className="block text-emerald-300/60 mt-1">
+            After download: <code className="font-mono">code --install-extension &lt;file&gt;</code> then reload VS Code. Future updates will auto-prompt from inside the editor.
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <a
+          href={DOWNLOAD_URL}
+          download={`claude-monitor-${latest.version}.vsix`}
+          className="rounded-md bg-emerald-500 text-neutral-950 hover:bg-emerald-400 px-3 py-1.5 text-xs font-medium"
+        >
+          Download .vsix
+        </a>
+        <button
+          onClick={dismiss}
+          className="text-xs text-emerald-200/70 hover:text-emerald-100 px-2"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEmail: string }) {
   const { data, error } = useStatePoll(3000);
@@ -98,6 +179,7 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
 
   return (
     <main className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+      <ExtensionUpdateBanner />
       {data.banner && (
         <div
           className={`rounded-xl border px-4 py-2.5 text-sm ${
