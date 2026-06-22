@@ -13,11 +13,14 @@ const DISCLOSURE_PATH = path.join(KILL_DIR, "disclosure-accepted.json");
 const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_MD_USER = path.join(os.homedir(), ".claude", "CLAUDE.md");
 const SERVER_URL = "https://claude-code-monitor-theta.vercel.app";
-const EXT_VERSION = "0.3.0";
+const EXT_VERSION = "0.4.0";
 
 type BypassState = {
   expiresAt: string;
   originalMode: string | null;
+  // Snapshot of permissions.ask at activation time. Restored on revert.
+  // null = the field was absent in settings.json before bypass started.
+  originalAsk: string[] | null;
   activatedAt: string;
 };
 
@@ -100,7 +103,7 @@ function renderBypassStatus() {
   }
   const remaining = formatRemaining(state.expiresAt);
   statusBar.text = `$(warning) BYPASS ${remaining}`;
-  statusBar.tooltip = `Permission prompts bypassed. Click to cancel or extend. Reverts at ${new Date(state.expiresAt).toLocaleTimeString()}.`;
+  statusBar.tooltip = `Permission prompts bypassed (defaultMode + ask list). Click to cancel or extend. Reverts at ${new Date(state.expiresAt).toLocaleTimeString()}.`;
   statusBar.color = "#ffffff";
   statusBar.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
   statusBar.command = "claudeMonitor.toggleBypassMode";
@@ -158,7 +161,17 @@ async function activateBypass(durationMinutes: number) {
   // into a no-op if the user toggles while already bypassed via some other path.
   const safeOriginal = originalMode === "bypassPermissions" ? null : originalMode;
 
+  // Capture the ask list so we can restore it. permissions.ask is a hard floor
+  // that bypassPermissions does NOT skip by design — clearing it is the only
+  // way to make timed bypass actually total. Saved verbatim.
+  const currentAsk = permissions.ask;
+  let originalAsk: string[] | null = null;
+  if (Array.isArray(currentAsk)) {
+    originalAsk = (currentAsk as unknown[]).filter((x) => typeof x === "string") as string[];
+  }
+
   permissions.defaultMode = "bypassPermissions";
+  permissions.ask = [];
   settings.permissions = permissions;
   writeSettings(settings);
 
@@ -167,6 +180,7 @@ async function activateBypass(durationMinutes: number) {
   writeBypassState({
     expiresAt: expiresAt.toISOString(),
     originalMode: safeOriginal,
+    originalAsk,
     activatedAt: now.toISOString(),
   });
   bypassActive = true;
@@ -184,9 +198,31 @@ async function revertBypass() {
     } else {
       delete permissions.defaultMode;
     }
-    settings.permissions = permissions;
-    writeSettings(settings);
   }
+
+  // Restore the ask list. Only do it when the current ask is still empty —
+  // if the user manually added something during the bypass window, keep their
+  // edit and just merge the original entries that aren't already there.
+  if (state) {
+    const currentAsk = Array.isArray(permissions.ask) ? (permissions.ask as string[]) : [];
+    if (state.originalAsk === null) {
+      // Field was absent before bypass — only delete if user didn't manually add.
+      if (currentAsk.length === 0) {
+        delete permissions.ask;
+      }
+    } else {
+      // Merge: keep anything the user added during bypass, then append every
+      // original entry that's missing. Order: user-added first, then originals.
+      const merged: string[] = [...currentAsk];
+      for (const orig of state.originalAsk) {
+        if (!merged.includes(orig)) merged.push(orig);
+      }
+      permissions.ask = merged;
+    }
+  }
+
+  settings.permissions = permissions;
+  writeSettings(settings);
 
   clearBypassState();
   bypassActive = false;
