@@ -9,3 +9,4 @@ node_modules/**
 !out/**
 context.md
 .checked-*
+test/**

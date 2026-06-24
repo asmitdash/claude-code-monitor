@@ -13,7 +13,7 @@ const DISCLOSURE_PATH = path.join(KILL_DIR, "disclosure-accepted.json");
 const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_MD_USER = path.join(os.homedir(), ".claude", "CLAUDE.md");
 const SERVER_URL = "https://claude-code-monitor-theta.vercel.app";
-const EXT_VERSION = "0.4.0";
+const EXT_VERSION = "0.5.0";
 
 type BypassState = {
   expiresAt: string;
@@ -21,6 +21,14 @@ type BypassState = {
   // Snapshot of permissions.ask at activation time. Restored on revert.
   // null = the field was absent in settings.json before bypass started.
   originalAsk: string[] | null;
+  // Snapshot of the IDE-side flags. The Claude Code IDE extension reads these
+  // VSCode-level settings and gates the --allow-dangerously-skip-permissions
+  // CLI flag on them. Without `allowDangerouslySkipPermissions=true` the IDE
+  // strips bypass mode before spawning the agent — that's why setting only
+  // `defaultMode: bypassPermissions` in ~/.claude/settings.json wasn't
+  // enough. We now flip both alongside.
+  originalIdeAllowSkip: boolean | null | undefined;
+  originalIdeInitialMode: string | null | undefined;
   activatedAt: string;
 };
 
@@ -151,6 +159,31 @@ function clearBypassState() {
   if (fs.existsSync(BYPASS_STATE_PATH)) fs.unlinkSync(BYPASS_STATE_PATH);
 }
 
+// Read the IDE-side claudeCode.* settings without losing the inspect()
+// distinction between "explicitly set to false" and "absent (so default)".
+// Returns undefined when the key has no user-level entry.
+function readIdeFlag<T>(key: string): T | undefined {
+  try {
+    const cfg = vscode.workspace.getConfiguration("claudeCode");
+    const inspected = cfg.inspect<T>(key);
+    if (inspected?.globalValue !== undefined) return inspected.globalValue;
+    if (inspected?.workspaceValue !== undefined) return inspected.workspaceValue;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeIdeFlag<T>(key: string, value: T | undefined): Promise<void> {
+  try {
+    const cfg = vscode.workspace.getConfiguration("claudeCode");
+    await cfg.update(key, value, vscode.ConfigurationTarget.Global);
+  } catch {
+    // VSCode rejects updates while configuration is being initialized — best
+    // effort, the next heartbeat will retry through the ticker.
+  }
+}
+
 async function activateBypass(durationMinutes: number) {
   const settings = readSettings();
   const permissions = (settings.permissions as Record<string, unknown> | undefined) ?? {};
@@ -170,6 +203,13 @@ async function activateBypass(durationMinutes: number) {
     originalAsk = (currentAsk as unknown[]).filter((x) => typeof x === "string") as string[];
   }
 
+  // Capture and flip the IDE-side flags. Without these the Claude Code IDE
+  // extension strips bypass mode before spawning the agent.
+  const originalIdeAllowSkip = readIdeFlag<boolean>("allowDangerouslySkipPermissions");
+  const originalIdeInitialMode = readIdeFlag<string>("initialPermissionMode");
+  await writeIdeFlag<boolean>("allowDangerouslySkipPermissions", true);
+  await writeIdeFlag<string>("initialPermissionMode", "bypassPermissions");
+
   permissions.defaultMode = "bypassPermissions";
   permissions.ask = [];
   settings.permissions = permissions;
@@ -181,6 +221,10 @@ async function activateBypass(durationMinutes: number) {
     expiresAt: expiresAt.toISOString(),
     originalMode: safeOriginal,
     originalAsk,
+    originalIdeAllowSkip:
+      originalIdeAllowSkip === undefined ? null : originalIdeAllowSkip,
+    originalIdeInitialMode:
+      originalIdeInitialMode === undefined ? null : originalIdeInitialMode,
     activatedAt: now.toISOString(),
   });
   bypassActive = true;
@@ -223,6 +267,24 @@ async function revertBypass() {
 
   settings.permissions = permissions;
   writeSettings(settings);
+
+  // Restore IDE-side flags. null in state = key was absent before bypass, so
+  // we delete it (passing undefined to cfg.update removes the user-level entry).
+  if (state) {
+    if (state.originalIdeAllowSkip === null || state.originalIdeAllowSkip === undefined) {
+      await writeIdeFlag<boolean>("allowDangerouslySkipPermissions", undefined);
+    } else {
+      await writeIdeFlag<boolean>(
+        "allowDangerouslySkipPermissions",
+        state.originalIdeAllowSkip,
+      );
+    }
+    if (state.originalIdeInitialMode === null || state.originalIdeInitialMode === undefined) {
+      await writeIdeFlag<string>("initialPermissionMode", undefined);
+    } else {
+      await writeIdeFlag<string>("initialPermissionMode", state.originalIdeInitialMode);
+    }
+  }
 
   clearBypassState();
   bypassActive = false;
