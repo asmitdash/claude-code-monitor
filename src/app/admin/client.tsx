@@ -44,6 +44,28 @@ export function AdminClient({ apiToken }: { apiToken: string }) {
           </button>
         </div>
       )}
+      {data.versionGate && data.versionGate.outdatedUsers.length > 0 && (
+        <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div className="font-semibold mb-1">
+            ⚠ {data.versionGate.outdatedUsers.length} teammate
+            {data.versionGate.outdatedUsers.length === 1 ? "" : "s"} on extension &lt; {data.versionGate.minVersion} — they are blocked from starting Claude Code until they update
+          </div>
+          <div className="text-xs text-red-300/80 mb-2">
+            v0.3.0+ auto-updates. Anyone below has to reinstall the .vsix manually.
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            {data.versionGate.outdatedUsers.map((u) => (
+              <div key={u.id} className="flex items-center gap-2">
+                <span className="text-red-200">{u.email}</span>
+                <span className="text-red-400/70 font-mono">v{u.installedVersion ?? "(unknown)"}</span>
+                <span className="text-red-400/50 ml-auto">
+                  {u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString() : "never"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {data.me.isImpersonating && (
         <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm text-violet-200 flex items-center justify-between">
           <span>

@@ -6,8 +6,13 @@ import { getActiveSlots } from "@/lib/slots";
 import { eventWeight, tokenGuess, costMicros } from "@/lib/activity";
 import { audit } from "@/lib/audit";
 import { activeRestrictions, hasActiveOverride } from "@/lib/quota";
-import { noteHeartbeat } from "@/lib/engine";
+import { noteHeartbeat, endSlot } from "@/lib/engine";
 import { isAdminBypass } from "@/lib/role";
+import {
+  extensionMeetsMinimum,
+  getMinExtensionVersion,
+  versionGateReason,
+} from "@/lib/version-gate";
 
 export const runtime = "nodejs";
 
@@ -79,12 +84,50 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Version gate: read last-known extensionVersion from presence. If below
+  // the minimum, force-end the active slot and refuse this hook. Admins
+  // bypass so they can still triage.
+  const adminBypass = isAdminBypass(user.role);
+  if (!adminBypass) {
+    const pres = await db
+      .select()
+      .from(schema.presence)
+      .where(eq(schema.presence.userId, user.id))
+      .limit(1);
+    const installed = pres[0]?.extensionVersion ?? null;
+    const minVersion = getMinExtensionVersion();
+    if (!extensionMeetsMinimum(installed, minVersion)) {
+      if (myActive) {
+        await endSlot({
+          slotId: myActive.slot.id,
+          reason: "force_end",
+          endedBy: "version_gate",
+          actorUserId: user.id,
+          actorEmail: user.email,
+          actorRole: user.role,
+          metadata: {
+            reason: "extension_outdated",
+            installedVersion: installed,
+            minVersion,
+            source: "ingest",
+          },
+        });
+      }
+      return NextResponse.json({
+        ok: true,
+        blocked: true,
+        adminBypass: false,
+        reason: versionGateReason(minVersion),
+        versionGate: { installedVersion: installed, minVersion },
+      });
+    }
+  }
+
   const flag = await db
     .select()
     .from(schema.killFlags)
     .where(eq(schema.killFlags.userId, user.id))
     .limit(1);
-  const adminBypass = isAdminBypass(user.role);
   const restr = adminBypass
     ? { paused: false, banned: false, cooldownUntil: null, reason: null }
     : await activeRestrictions(user.id);

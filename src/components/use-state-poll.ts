@@ -143,6 +143,16 @@ export type StatePayload = {
     days: Array<{ day: string; minutes: number; sessions: number }>;
   }>;
   presence: PresenceItem[];
+  versionGate?: {
+    minVersion: string;
+    outdatedUsers: Array<{
+      id: string;
+      email: string;
+      name: string | null;
+      installedVersion: string | null;
+      lastSeenAt: string | null;
+    }>;
+  };
   serverNow: string;
 };
 

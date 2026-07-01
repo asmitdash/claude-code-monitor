@@ -16,6 +16,7 @@ import { quotaFor, hasActiveOverride, activeRestrictions } from "@/lib/quota";
 import { presenceState, STATE_ICON, STATE_LABEL } from "@/lib/presence-state";
 import { scoreLabel } from "@/lib/activity";
 import { isAdminBypass } from "@/lib/role";
+import { extensionMeetsMinimum, getMinExtensionVersion } from "@/lib/version-gate";
 
 export const runtime = "nodejs";
 
@@ -270,6 +271,33 @@ export async function GET() {
   );
 
   const myPresence = presence.get(me.id) ?? null;
+
+  // Version-gate summary for admin banner: list users whose last-reported
+  // extensionVersion is below MIN_EXTENSION_VERSION.
+  const minExtVersion = getMinExtensionVersion();
+  const outdatedUsers = isAdmin
+    ? usersList
+        .map((u) => {
+          const p = presence.get(u.id) ?? null;
+          const ok = extensionMeetsMinimum(p?.extensionVersion, minExtVersion);
+          if (ok) return null;
+          return {
+            id: u.id,
+            email: u.email,
+            name: u.name,
+            installedVersion: p?.extensionVersion ?? null,
+            lastSeenAt: p?.lastSeenAt ?? null,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null)
+        .filter((x) => x.lastSeenAt) // only surface users who've been seen at least once
+        .sort((a, b) => {
+          const ta = a.lastSeenAt ? new Date(a.lastSeenAt).getTime() : 0;
+          const tb = b.lastSeenAt ? new Date(b.lastSeenAt).getTime() : 0;
+          return tb - ta;
+        })
+    : [];
+
   return NextResponse.json({
     me: {
       id: me.id,
@@ -364,6 +392,10 @@ export async function GET() {
     myUsage,
     allUsage,
     presence: presenceArr,
+    versionGate: {
+      minVersion: minExtVersion,
+      outdatedUsers,
+    },
     serverNow: new Date().toISOString(),
   });
 }

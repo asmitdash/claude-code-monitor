@@ -12,6 +12,12 @@ import { activeRestrictions, hasActiveOverride } from "@/lib/quota";
 import { getConfig } from "@/lib/config";
 import { noteHeartbeat } from "@/lib/engine";
 import { isAdminBypass } from "@/lib/role";
+import {
+  extensionMeetsMinimum,
+  getMinExtensionVersion,
+  versionGateReason,
+} from "@/lib/version-gate";
+import { endSlot } from "@/lib/engine";
 
 export const runtime = "nodejs";
 
@@ -61,6 +67,54 @@ export async function POST(req: NextRequest) {
         extensionVersion,
       },
     });
+
+  // Version gate: if the extension reports a version below MIN_EXTENSION_VERSION
+  // (or nothing at all), refuse further hooks and force-end any active slot.
+  // Admins bypass this so a stale-extension admin doesn't lock themselves out
+  // of the dashboard while investigating.
+  const minVersion = getMinExtensionVersion();
+  const versionOk = extensionMeetsMinimum(extensionVersion, minVersion);
+  const versionBlocked = !isAdminBypass(user.role) && !versionOk;
+  if (versionBlocked) {
+    const active = await getActiveSlots();
+    const myActive = active.find((s) => s.user.id === user.id);
+    if (myActive) {
+      await endSlot({
+        slotId: myActive.slot.id,
+        reason: "force_end",
+        endedBy: "version_gate",
+        actorUserId: user.id,
+        actorEmail: user.email,
+        actorRole: user.role,
+        metadata: {
+          reason: "extension_outdated",
+          installedVersion: extensionVersion,
+          minVersion,
+        },
+      });
+    }
+    await audit({
+      action: "unauthorized.attempt",
+      severity: "warn",
+      actorUserId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      targetUserId: user.id,
+      targetEmail: user.email,
+      metadata: {
+        source: "version_gate",
+        installedVersion: extensionVersion,
+        minVersion,
+      },
+    });
+    return NextResponse.json({
+      ok: true,
+      blocked: true,
+      adminBypass: false,
+      reason: versionGateReason(minVersion),
+      versionGate: { installedVersion: extensionVersion, minVersion },
+    });
+  }
 
   // Bump heartbeat on user's slot if any. When the extension reports Claude
   // Code is running or open, treat that as user presence — advance
