@@ -43,12 +43,16 @@ export async function runSweep(): Promise<SweepReport> {
     if (isAdminBypass(r.user.role)) continue;
 
     const planned = new Date(r.slot.plannedEndAt).getTime();
-    const last = r.slot.lastActivityAt
+    const lastActivity = r.slot.lastActivityAt
       ? new Date(r.slot.lastActivityAt).getTime()
       : new Date(r.slot.startedAt).getTime();
     const lastHb = r.slot.lastHeartbeatAt
       ? new Date(r.slot.lastHeartbeatAt).getTime()
       : new Date(r.slot.startedAt).getTime();
+    // Idle is measured against the most recent of the two signals. On slow
+    // hardware the hook can lag, but the extension is still reporting
+    // presence; either one counts as "user is here".
+    const last = Math.max(lastActivity, lastHb);
 
     if (planned < now) {
       await endSlot({
@@ -66,12 +70,19 @@ export async function runSweep(): Promise<SweepReport> {
         reason: "idle",
         endedBy: "auto-idle",
         actorEmail: "system",
-        metadata: { idleMinutes: Math.round((now - last) / 60_000) },
+        metadata: {
+          idleMinutes: Math.round((now - last) / 60_000),
+          activityGapMin: Math.round((now - lastActivity) / 60_000),
+          heartbeatGapMin: Math.round((now - lastHb) / 60_000),
+        },
       });
       idleEnded++;
       continue;
     }
-    if (now - lastHb >= cfg.staleHeartbeatMinutes * 60_000) {
+    if (
+      cfg.staleHeartbeatEnabled &&
+      now - lastHb >= cfg.staleHeartbeatMinutes * 60_000
+    ) {
       await endSlot({
         slotId: r.slot.id,
         reason: "stale_heartbeat",

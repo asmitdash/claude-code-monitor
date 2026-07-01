@@ -62,11 +62,17 @@ export async function POST(req: NextRequest) {
       },
     });
 
-  // Bump heartbeat on user's slot if any
+  // Bump heartbeat on user's slot if any. When the extension reports Claude
+  // Code is running or open, treat that as user presence — advance
+  // lastActivityAt so the idle-sweep doesn't kill a live slot when the hook
+  // is flaky/slow (e.g. old hardware, CPU starvation, hook cold-starts).
+  // Presence-only pings do NOT bump scoring counters.
   const active = await getActiveSlots();
   const myActive = active.find((s) => s.user.id === user.id);
   if (myActive) {
-    await noteHeartbeat(myActive.slot.id);
+    await noteHeartbeat(myActive.slot.id, {
+      presence: claudeRunning || claudeOpen,
+    });
   }
 
   const queue = await getQueue();

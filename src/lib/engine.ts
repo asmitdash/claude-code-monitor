@@ -337,11 +337,16 @@ export async function noteHeartbeat(slotId: string, opts?: {
   costMicros?: number;
   toolCallDelta?: number;
   eventDelta?: number;
+  // presence=true means "user is present with Claude Code open" — advance
+  // lastActivityAt so the idle-sweep doesn't kill a live slot when the hook
+  // is flaky/slow (e.g. on old hardware), but don't touch the scoring
+  // counters. presence-only advances never increment activityScore/eventCount.
+  presence?: boolean;
 }) {
   const set: Record<string, unknown> = {
     lastHeartbeatAt: new Date(),
   };
-  if ((opts?.activityWeight ?? 0) > 0) {
+  if ((opts?.activityWeight ?? 0) > 0 || opts?.presence) {
     set.lastActivityAt = new Date();
   }
   await db
@@ -349,9 +354,9 @@ export async function noteHeartbeat(slotId: string, opts?: {
     .set(set)
     .where(eq(schema.slots.id, slotId));
 
-  if (opts) {
+  if (opts && !opts.presence) {
     const inc = opts;
-    // bump counters
+    // bump counters (only for real activity, not presence pings)
     await db
       .update(schema.slots)
       .set({

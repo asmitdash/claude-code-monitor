@@ -14,6 +14,7 @@ const ALLOW = new Set([
   "idleAutoEndMinutes",
   "idleWarnMinutes",
   "staleHeartbeatMinutes",
+  "staleHeartbeatEnabled",
   "graceTimerSeconds",
   "maxConcurrentSlots",
   "freezeBanner",
@@ -37,6 +38,8 @@ export async function PATCH(req: NextRequest) {
       patch[k] = body[k] ? new Date(body[k]) : null;
     } else if (k === "freezeBanner") {
       patch[k] = body[k] ? String(body[k]).slice(0, 300) : null;
+    } else if (k === "staleHeartbeatEnabled") {
+      patch[k] = Boolean(body[k]);
     } else {
       const n = Number(body[k]);
       if (Number.isFinite(n) && n >= 0) patch[k] = n;
