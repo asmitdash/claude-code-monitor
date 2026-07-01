@@ -79,6 +79,18 @@ export const slots = pgTable(
     estimatedCostMicros: integer("estimated_cost_micros").notNull().default(0),
     cwd: text("cwd"),
     warned10min: boolean("warned_10min").notNull().default(false),
+    // Telemetry expansion 2026-07: TTF (time-to-first-token) proxy is the
+    // first `tool` or `model` event after slot start. Stored as ms delta.
+    firstToolAtMs: integer("first_tool_at_ms"),
+    // Warn-when-idle counter: how many times idle-warn fired for THIS slot.
+    idleWarnCount: integer("idle_warn_count").notNull().default(0),
+    // Post-hoc user tagging. Owner sets on slot end (M4).
+    outcomeTag: text("outcome_tag"), // 'progress' | 'stuck' | 'exploratory' | null
+    outcomeNote: text("outcome_note"),
+    outcomeTaggedAt: timestamp("outcome_tagged_at", { withTimezone: true }),
+    // M5: inferred project name from cwd basename or git remote — populated
+    // by the extension at slot start if provided.
+    projectName: text("project_name"),
   },
   (t) => ({
     userIdx: index("slots_user_idx").on(t.userId),

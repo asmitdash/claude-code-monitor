@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
   const desiredMinutes = body.desiredMinutes ? Number(body.desiredMinutes) : 60;
   const cwd = body.cwd ? String(body.cwd).slice(0, 500) : null;
   const note = body.note ? String(body.note).slice(0, 200) : null;
+  const projectName = body.projectName ? String(body.projectName).slice(0, 100) : null;
   const joinQueueIfFull = Boolean(body.joinQueueIfFull ?? true);
 
   const decision = await tryClaim({
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest) {
     desiredMinutes,
     purpose,
     cwd,
+    projectName,
     joinQueueIfFull,
     note,
   });

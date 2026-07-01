@@ -210,6 +210,22 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
 
   return (
     <main className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+      <div className="flex items-center gap-3 text-xs text-neutral-500">
+        <a href="/dashboard" className="text-neutral-100 font-medium">
+          Dashboard
+        </a>
+        <a href="/dashboard/team" className="hover:text-neutral-100">
+          Team presence
+        </a>
+        <a href="/dashboard/digest" className="hover:text-neutral-100">
+          Weekly digest
+        </a>
+        {data.me.role === "admin" && (
+          <a href="/admin/insights" className="ml-auto text-neutral-400 hover:text-neutral-100">
+            Team insights →
+          </a>
+        )}
+      </div>
       <ExtensionUpdateBanner installedVersion={data.me.extensionVersion ?? null} />
       {data.banner && (
         <div

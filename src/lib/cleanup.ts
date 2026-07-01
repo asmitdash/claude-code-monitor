@@ -2,7 +2,7 @@
 // endpoint or opportunistically from request handlers.
 
 import { db, schema } from "@/db";
-import { and, eq, lt, isNull } from "drizzle-orm";
+import { and, eq, lt, isNull, sql } from "drizzle-orm";
 import { audit } from "@/lib/audit";
 import { getActiveSlots } from "@/lib/slots";
 import { endSlot } from "@/lib/engine";
@@ -78,6 +78,16 @@ export async function runSweep(): Promise<SweepReport> {
       });
       idleEnded++;
       continue;
+    }
+    // Warn-when-idle counter: if the slot is past the WARN threshold but
+    // not yet the AUTO_END threshold, count it once per sweep. Cheap proxy
+    // for "how often does this user drift". We compare against the previous
+    // count to avoid double-counting across sweeps within the same window.
+    if (now - last >= cfg.idleWarnMinutes * 60_000) {
+      await db
+        .update(schema.slots)
+        .set({ idleWarnCount: sql`${schema.slots.idleWarnCount} + 1` } as never)
+        .where(eq(schema.slots.id, r.slot.id));
     }
     if (
       cfg.staleHeartbeatEnabled &&

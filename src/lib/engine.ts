@@ -31,6 +31,7 @@ export async function tryClaim(opts: {
   desiredMinutes?: number;
   purpose?: string | null;
   cwd?: string | null;
+  projectName?: string | null;
   joinQueueIfFull?: boolean;
   note?: string | null;
 }): Promise<ClaimDecision> {
@@ -137,6 +138,7 @@ export async function tryClaim(opts: {
       durationMinutes: desired,
       purpose: opts.purpose ?? null,
       cwd: opts.cwd ?? null,
+      projectName: opts.projectName ?? null,
       lastHeartbeatAt: startedAt,
       lastActivityAt: startedAt,
       overrideApprovalId: override.active ? override.approval?.id ?? null : null,
@@ -367,6 +369,21 @@ export async function noteHeartbeat(slotId: string, opts?: {
         estimatedCostMicros: sql<number>`${schema.slots.estimatedCostMicros} + ${inc.costMicros ?? 0}`,
       } as never)
       .where(eq(schema.slots.id, slotId));
+
+    // Time-to-first-tool: stamp the ms delta from slot start on the very
+    // first tool call (or first event, if no tool was involved).
+    if ((inc.toolCallDelta ?? 0) > 0 || (inc.eventDelta ?? 0) > 0) {
+      await db
+        .update(schema.slots)
+        .set({
+          firstToolAtMs: sql<number>`
+            case
+              when ${schema.slots.firstToolAtMs} is not null then ${schema.slots.firstToolAtMs}
+              else extract(epoch from (now() - ${schema.slots.startedAt})) * 1000
+            end`,
+        } as never)
+        .where(eq(schema.slots.id, slotId));
+    }
   }
 }
 
