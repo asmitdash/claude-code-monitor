@@ -14,6 +14,7 @@ const DEFAULTS = {
   idleWarnMinutes: 5,
   staleHeartbeatMinutes: 5,
   staleHeartbeatEnabled: true,
+  bypassPermissionsEnabled: true,
   graceTimerSeconds: 60,
   maxConcurrentSlots: 2,
   freezeBanner: null,

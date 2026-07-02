@@ -15,6 +15,7 @@ const ALLOW = new Set([
   "idleWarnMinutes",
   "staleHeartbeatMinutes",
   "staleHeartbeatEnabled",
+  "bypassPermissionsEnabled",
   "graceTimerSeconds",
   "maxConcurrentSlots",
   "freezeBanner",
@@ -38,7 +39,7 @@ export async function PATCH(req: NextRequest) {
       patch[k] = body[k] ? new Date(body[k]) : null;
     } else if (k === "freezeBanner") {
       patch[k] = body[k] ? String(body[k]).slice(0, 300) : null;
-    } else if (k === "staleHeartbeatEnabled") {
+    } else if (k === "staleHeartbeatEnabled" || k === "bypassPermissionsEnabled") {
       patch[k] = Boolean(body[k]);
     } else {
       const n = Number(body[k]);

@@ -224,6 +224,7 @@ export async function POST(req: NextRequest) {
     config: {
       maxConcurrentSlots: cfg.maxConcurrentSlots,
       pollIntervalSeconds: 10,
+      bypassPermissionsEnabled: cfg.bypassPermissionsEnabled,
     },
   });
 }

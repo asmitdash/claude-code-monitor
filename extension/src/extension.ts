@@ -13,7 +13,7 @@ const DISCLOSURE_PATH = path.join(KILL_DIR, "disclosure-accepted.json");
 const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_MD_USER = path.join(os.homedir(), ".claude", "CLAUDE.md");
 const SERVER_URL = "https://claude-code-monitor-theta.vercel.app";
-const EXT_VERSION = "0.5.0";
+const EXT_VERSION = "0.6.0";
 
 type BypassState = {
   expiresAt: string;
@@ -48,6 +48,11 @@ let lastBlocked = false;
 let claudeProcessSeen = false;
 let windowFocused = true;
 let bypassActive = false;
+// Server-controlled kill switch for the timed bypass-permissions feature.
+// Populated by every /api/extension/status response. Default true so
+// pre-upgrade servers (no field on response) don't accidentally lock the
+// feature off.
+let bypassPermissionsAllowed = true;
 
 function getServerUrl(): string {
   return SERVER_URL;
@@ -711,6 +716,14 @@ async function poll(ctx: vscode.ExtensionContext) {
     return;
   }
 
+  // Cache server-side kill switch for the timed bypass-permissions feature.
+  // Only override when the server explicitly reports a value — a missing field
+  // (older server, transient failure) leaves the last-known value in place.
+  const cfg = resp?.config as Record<string, unknown> | undefined;
+  if (cfg && typeof cfg.bypassPermissionsEnabled === "boolean") {
+    bypassPermissionsAllowed = cfg.bypassPermissionsEnabled;
+  }
+
   const blocked = Boolean(resp?.blocked);
   const reason = (resp?.reason as string | null) ?? "ended by team lead";
 
@@ -952,6 +965,16 @@ export async function activate(ctx: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand("claudeMonitor.toggleBypassMode", async () => {
       const state = readBypassState();
+      // Cancelling / extending an already-running bypass is always permitted
+      // — the kill switch only gates *starting* a new one. This matches the
+      // policy: flipping the admin toggle off doesn't yank the rug out from
+      // anyone mid-session; existing bypasses run out naturally.
+      if (!state && !bypassPermissionsAllowed) {
+        vscode.window.showWarningMessage(
+          "Claude Monitor: bypass-permissions is disabled by admin.",
+        );
+        return;
+      }
       if (state) {
         const remaining = formatRemaining(state.expiresAt);
         const choice = await vscode.window.showQuickPick(
