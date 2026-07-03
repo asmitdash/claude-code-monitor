@@ -583,12 +583,104 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
           </button>
         </div>
         <p className="text-xs text-neutral-500 mb-2">
-          Paste this into the Claude Monitor VS Code extension.
+          Paste this into the Claude Monitor VS Code extension, or into the
+          Claude Desktop installer below.
         </p>
         <code className="block break-all rounded bg-neutral-950 border border-neutral-800 px-3 py-2 text-[11px] font-mono">
           {showToken ? apiToken : "•".repeat(40)}
         </code>
       </section>
+
+      <DesktopInstallerCard apiToken={apiToken} showToken={showToken} />
     </main>
+  );
+}
+
+function DesktopInstallerCard({
+  apiToken,
+  showToken,
+}: {
+  apiToken: string;
+  showToken: boolean;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const origin =
+    typeof window !== "undefined" ? window.location.origin : "";
+  const tokenForCmd = showToken ? apiToken : "YOUR_TOKEN";
+  const macCmd = `curl -fsSL ${origin}/api/setup/desktop-install -o /tmp/install.mjs && node /tmp/install.mjs --token=${tokenForCmd}`;
+  const winCmd = `curl.exe -fsSL ${origin}/api/setup/desktop-install -o "$env:TEMP\\install.mjs"; node "$env:TEMP\\install.mjs" --token=${tokenForCmd}`;
+
+  async function copy(label: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(label);
+      setTimeout(() => setCopied((c) => (c === label ? null : c)), 1500);
+    } catch {}
+  }
+
+  return (
+    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 mt-4">
+      <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-2">
+        Claude Desktop — standalone install (no VS Code needed)
+      </h2>
+      <p className="text-xs text-neutral-500 mb-3">
+        For teammates who use only Claude Desktop. Requires Node.js 20+ on the
+        machine. After it finishes, fully quit and reopen Claude Desktop.
+      </p>
+      <div className="space-y-3">
+        <InstallerBlock
+          label="macOS / Linux"
+          value="mac"
+          cmd={macCmd}
+          copied={copied}
+          onCopy={() => copy("mac", macCmd)}
+        />
+        <InstallerBlock
+          label="Windows (PowerShell)"
+          value="win"
+          cmd={winCmd}
+          copied={copied}
+          onCopy={() => copy("win", winCmd)}
+        />
+      </div>
+      <p className="text-[11px] text-neutral-500 mt-3">
+        Same MCP server behavior as the VS Code extension installs — presence
+        heartbeats + tool-call logging + kill-switch enforcement.
+      </p>
+    </section>
+  );
+}
+
+function InstallerBlock({
+  label,
+  value,
+  cmd,
+  copied,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  cmd: string;
+  copied: string | null;
+  onCopy: () => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-[11px] uppercase tracking-wide text-neutral-500">
+          {label}
+        </div>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="text-[11px] text-neutral-400 hover:text-neutral-200"
+        >
+          {copied === value ? "Copied ✓" : "Copy"}
+        </button>
+      </div>
+      <code className="block break-all rounded bg-neutral-950 border border-neutral-800 px-3 py-2 text-[11px] font-mono">
+        {cmd}
+      </code>
+    </div>
   );
 }
