@@ -8,12 +8,27 @@ const TOKEN_KEY = "claudeMonitor.apiToken";
 const KILL_DIR = path.join(os.homedir(), ".claude-monitor");
 const KILL_FLAG = path.join(KILL_DIR, "blocked");
 const HOOK_SCRIPT = path.join(KILL_DIR, "hook.mjs");
+const DESKTOP_MCP_SCRIPT = path.join(KILL_DIR, "desktop-mcp.mjs");
 const BYPASS_STATE_PATH = path.join(KILL_DIR, "bypass-state.json");
 const DISCLOSURE_PATH = path.join(KILL_DIR, "disclosure-accepted.json");
 const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_MD_USER = path.join(os.homedir(), ".claude", "CLAUDE.md");
 const SERVER_URL = "https://claude-code-monitor-theta.vercel.app";
-const EXT_VERSION = "0.6.0";
+const EXT_VERSION = "0.7.0";
+// Claude Desktop's config file location differs per OS. We write into whichever
+// exists — if neither does yet, we default to the platform-native path so a
+// first-time Claude Desktop launch will pick it up.
+function claudeDesktopConfigPath(): string {
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  }
+  if (process.platform === "win32") {
+    const appdata = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
+    return path.join(appdata, "Claude", "claude_desktop_config.json");
+  }
+  const xdg = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
+  return path.join(xdg, "Claude", "claude_desktop_config.json");
+}
 
 type BypassState = {
   expiresAt: string;
@@ -886,6 +901,203 @@ process.exit(0);
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
 }
 
+// Install the Claude Desktop MCP server. Claude Desktop has no
+// extension/plugin system — MCP servers are the only supported hook. We
+// register a stdio server that (a) reports app presence + tool calls via
+// /api/ingest, (b) exposes a passive tool so we appear in the tool list,
+// (c) checks the kill flag before responding.
+//
+// Claude Desktop reads its config on startup only, so a user has to restart
+// the app after this runs the first time. The extension surfaces that in a
+// one-shot info toast.
+async function ensureDesktopMcpInstalled(): Promise<{ configWritten: boolean }> {
+  fs.mkdirSync(KILL_DIR, { recursive: true });
+  const url = getServerUrl();
+
+  const mcpScript = `#!/usr/bin/env node
+// Claude Monitor desktop MCP server v${EXT_VERSION} — reports Claude Desktop
+// presence and tool activity to the team dashboard, and enforces the kill
+// switch. Auto-installed by the Claude Monitor VS Code extension.
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import readline from "node:readline";
+
+const KILL_FLAG = path.join(os.homedir(), ".claude-monitor", "blocked");
+const TOKEN_FILE = path.join(os.homedir(), ".claude-monitor", "token");
+const SERVER = ${JSON.stringify(url || "")};
+const VERSION = ${JSON.stringify(EXT_VERSION)};
+const SOURCE = "claude-desktop";
+
+function readToken() {
+  try { return fs.readFileSync(TOKEN_FILE, "utf-8").trim(); } catch { return ""; }
+}
+
+function isBlocked() {
+  return fs.existsSync(KILL_FLAG);
+}
+
+async function report(eventType, extra) {
+  const token = readToken();
+  if (!token || !SERVER) return;
+  try {
+    await fetch(SERVER + "/api/ingest", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + token,
+        "X-Claude-Monitor-Ext": VERSION,
+      },
+      body: JSON.stringify({
+        event_type: eventType,
+        source: SOURCE,
+        cwd: process.cwd(),
+        ...(extra ?? {}),
+      }),
+    });
+  } catch {}
+}
+
+async function heartbeat() {
+  const token = readToken();
+  if (!token || !SERVER) return;
+  try {
+    await fetch(SERVER + "/api/extension/status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({
+        claudeRunning: true,
+        claudeOpen: true,
+        localSurface: true,
+        vscodeOpen: false,
+        windowFocused: true,
+        hostname: os.hostname(),
+        extensionVersion: VERSION,
+        source: SOURCE,
+      }),
+    });
+  } catch {}
+}
+
+function send(msg) {
+  process.stdout.write(JSON.stringify(msg) + "\\n");
+}
+
+function ok(id, result) {
+  send({ jsonrpc: "2.0", id, result });
+}
+
+function err(id, code, message) {
+  send({ jsonrpc: "2.0", id, error: { code, message } });
+}
+
+async function handle(req) {
+  const { id, method, params } = req;
+  if (method === "initialize") {
+    report("SessionStart", { tool: null, model: null, session_id: params?.clientInfo?.name ?? null });
+    return ok(id, {
+      protocolVersion: params?.protocolVersion ?? "2024-11-05",
+      capabilities: { tools: {} },
+      serverInfo: { name: "claude-monitor", version: VERSION },
+    });
+  }
+  if (method === "notifications/initialized" || method?.startsWith("notifications/")) {
+    return;
+  }
+  if (method === "tools/list") {
+    return ok(id, {
+      tools: [
+        {
+          name: "monitor__ping",
+          description: "Team-monitor presence ping. Safe no-op — its only purpose is to record Claude Desktop activity to your team dashboard.",
+          inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        },
+      ],
+    });
+  }
+  if (method === "tools/call") {
+    const toolName = params?.name ?? null;
+    if (isBlocked()) {
+      let reason = "ended by team lead";
+      try {
+        const raw = fs.readFileSync(KILL_FLAG, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed?.reason) reason = parsed.reason;
+      } catch {}
+      await report("PreToolUse", { tool: toolName, blocked: true, reason });
+      return err(id, -32001, "Claude Monitor: " + reason);
+    }
+    await report("PreToolUse", { tool: toolName });
+    return ok(id, {
+      content: [{ type: "text", text: "ok" }],
+    });
+  }
+  if (method === "prompts/list") return ok(id, { prompts: [] });
+  if (method === "resources/list") return ok(id, { resources: [] });
+  if (method === "ping") return ok(id, {});
+  return err(id, -32601, "method not found: " + method);
+}
+
+// Presence heartbeat every 60s while Claude Desktop keeps the process alive.
+setInterval(() => { void heartbeat(); }, 60_000);
+void heartbeat();
+
+const rl = readline.createInterface({ input: process.stdin });
+rl.on("line", async (line) => {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+  let req;
+  try { req = JSON.parse(trimmed); } catch { return; }
+  if (Array.isArray(req)) {
+    for (const r of req) await handle(r);
+  } else {
+    await handle(req);
+  }
+});
+rl.on("close", () => {
+  void report("Stop", {}).finally(() => process.exit(0));
+});
+`;
+  fs.writeFileSync(DESKTOP_MCP_SCRIPT, mcpScript, { mode: 0o755 });
+
+  const cfgPath = claudeDesktopConfigPath();
+  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+
+  let cfg: Record<string, unknown> = {};
+  if (fs.existsSync(cfgPath)) {
+    try {
+      cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+    } catch {
+      cfg = {};
+    }
+  }
+
+  const mcpServers =
+    (cfg.mcpServers as Record<string, Record<string, unknown>> | undefined) ?? {};
+  const desired = {
+    command: process.execPath || "node",
+    args: [DESKTOP_MCP_SCRIPT],
+  };
+  const existing = mcpServers["claude-monitor"];
+  const same =
+    existing &&
+    typeof existing === "object" &&
+    existing.command === desired.command &&
+    Array.isArray(existing.args) &&
+    existing.args.length === desired.args.length &&
+    (existing.args as unknown[]).every((a, i) => a === desired.args[i]);
+
+  if (same) return { configWritten: false };
+
+  mcpServers["claude-monitor"] = desired;
+  cfg.mcpServers = mcpServers;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+  return { configWritten: true };
+}
+
 async function writeTokenFileFromSecret(ctx: vscode.ExtensionContext) {
   const token = await getToken(ctx);
   fs.mkdirSync(KILL_DIR, { recursive: true });
@@ -931,8 +1143,13 @@ export async function activate(ctx: vscode.ExtensionContext) {
         await setToken(ctx, token);
         await writeTokenFileFromSecret(ctx);
         await ensureHookInstalled();
+        const desktop = await ensureDesktopMcpInstalled().catch(() => ({
+          configWritten: false,
+        }));
         vscode.window.showInformationMessage(
-          "Claude Monitor signed in. Hook installed in ~/.claude/settings.json.",
+          desktop.configWritten
+            ? "Claude Monitor signed in. Hooks installed for Claude Code and Claude Desktop. Restart Claude Desktop once so it picks up the new MCP server."
+            : "Claude Monitor signed in. Hook installed in ~/.claude/settings.json.",
         );
         await poll(ctx);
       }
@@ -945,7 +1162,27 @@ export async function activate(ctx: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand("claudeMonitor.installHook", async () => {
       await ensureHookInstalled();
-      vscode.window.showInformationMessage("Claude Monitor hook (re)installed.");
+      const desktop = await ensureDesktopMcpInstalled().catch(() => ({
+        configWritten: false,
+      }));
+      vscode.window.showInformationMessage(
+        desktop.configWritten
+          ? "Claude Monitor: hooks (re)installed. Claude Desktop config was updated — restart it once."
+          : "Claude Monitor: hooks (re)installed.",
+      );
+    }),
+    vscode.commands.registerCommand("claudeMonitor.installDesktopMcp", async () => {
+      const desktop = await ensureDesktopMcpInstalled().catch((e) => {
+        vscode.window.showErrorMessage(
+          "Claude Monitor: desktop MCP install failed: " + String(e),
+        );
+        return { configWritten: false };
+      });
+      vscode.window.showInformationMessage(
+        desktop.configWritten
+          ? "Claude Monitor: Claude Desktop MCP installed. Restart Claude Desktop for it to take effect."
+          : "Claude Monitor: Claude Desktop MCP was already installed and up to date.",
+      );
     }),
     vscode.commands.registerCommand("claudeMonitor.openDashboard", () => {
       const url = getServerUrl();
@@ -1082,6 +1319,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
       });
   } else {
     await ensureHookInstalled();
+    // Best-effort — never block activation on desktop MCP install.
+    void ensureDesktopMcpInstalled().catch(() => {});
   }
 
   let lastUpdateCheck = 0;

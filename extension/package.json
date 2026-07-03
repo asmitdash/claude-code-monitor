@@ -2,7 +2,7 @@
   "name": "claude-monitor",
   "displayName": "Claude Monitor",
   "description": "Reports Claude Code activity to your team's Claude Code Monitor dashboard, and enforces the team lead's kill-switch via a Claude Code PreToolUse hook.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "asmitdash",
   "private": true,
   "engines": {
@@ -28,6 +28,10 @@
       {
         "command": "claudeMonitor.installHook",
         "title": "Claude Monitor: Install/refresh Claude Code hook"
+      },
+      {
+        "command": "claudeMonitor.installDesktopMcp",
+        "title": "Claude Monitor: Install/refresh Claude Desktop MCP"
       },
       {
         "command": "claudeMonitor.openDashboard",
