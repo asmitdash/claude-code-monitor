@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 // tool-call logging + kill-flag enforcement.
 export function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
-  const version = "0.7.1";
+  const version = "0.8.0";
 
   const script = `#!/usr/bin/env node
 // Claude Monitor — Claude Desktop standalone installer (v${version})
@@ -105,6 +105,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
+import { execFile } from "node:child_process";
 
 const KILL_FLAG = path.join(os.homedir(), ".claude-monitor", "blocked");
 const TOKEN_FILE = path.join(os.homedir(), ".claude-monitor", "token");
@@ -138,11 +139,27 @@ async function report(eventType, extra) {
   } catch {}
 }
 
+function killClaudeDesktop() {
+  const targets =
+    process.platform === "win32"
+      ? ["Claude.exe", "Claude-3p.exe", "Claude Desktop.exe"]
+      : ["Claude", "Claude Desktop", "claude-desktop"];
+  for (const name of targets) {
+    try {
+      if (process.platform === "win32") {
+        execFile("taskkill", ["/F", "/IM", name], () => {});
+      } else {
+        execFile("pkill", ["-f", name], () => {});
+      }
+    } catch {}
+  }
+}
+
 async function heartbeat() {
   const token = readToken();
   if (!token || !SERVER) return;
   try {
-    await fetch(SERVER + "/api/extension/status", {
+    const r = await fetch(SERVER + "/api/extension/status", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -159,6 +176,16 @@ async function heartbeat() {
         source: SOURCE,
       }),
     });
+    if (!r.ok) return;
+    const body = await r.json().catch(() => null);
+    if (body && body.blocked === true && !body.adminBypass) {
+      const reason = typeof body.reason === "string" ? body.reason : "ended by team lead";
+      try {
+        fs.mkdirSync(path.dirname(KILL_FLAG), { recursive: true });
+        fs.writeFileSync(KILL_FLAG, JSON.stringify({ reason, setAt: new Date().toISOString() }));
+      } catch {}
+      setTimeout(() => killClaudeDesktop(), 500);
+    }
   } catch {}
 }
 
@@ -203,7 +230,7 @@ async function handle(req) {
   return err(id, -32601, "method not found: " + method);
 }
 
-setInterval(() => { void heartbeat(); }, 60_000);
+setInterval(() => { void heartbeat(); }, 10_000);
 void heartbeat();
 
 const rl = readline.createInterface({ input: process.stdin });

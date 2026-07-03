@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 // Edit Config UI in Claude Desktop.
 export function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
-  const version = "0.7.1";
+  const version = "0.8.0";
 
   const script = `#!/usr/bin/env node
 // Claude Monitor desktop MCP server v${version}
@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
+import { execFile } from "node:child_process";
 
 const KILL_FLAG = path.join(os.homedir(), ".claude-monitor", "blocked");
 const TOKEN_FILE = path.join(os.homedir(), ".claude-monitor", "token");
@@ -51,11 +52,29 @@ async function report(eventType, extra) {
   } catch {}
 }
 
+// Kill Claude Desktop's process tree so a blocked user can't keep working.
+// Best-effort per-OS: taskkill on Windows, pkill on macOS/Linux.
+function killClaudeDesktop() {
+  const targets =
+    process.platform === "win32"
+      ? ["Claude.exe", "Claude-3p.exe", "Claude Desktop.exe"]
+      : ["Claude", "Claude Desktop", "claude-desktop"];
+  for (const name of targets) {
+    try {
+      if (process.platform === "win32") {
+        execFile("taskkill", ["/F", "/IM", name], () => {});
+      } else {
+        execFile("pkill", ["-f", name], () => {});
+      }
+    } catch {}
+  }
+}
+
 async function heartbeat() {
   const token = readToken();
   if (!token || !SERVER) return;
   try {
-    await fetch(SERVER + "/api/extension/status", {
+    const r = await fetch(SERVER + "/api/extension/status", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -72,6 +91,19 @@ async function heartbeat() {
         source: SOURCE,
       }),
     });
+    if (!r.ok) return;
+    const body = await r.json().catch(() => null);
+    // Server-decided kill: no slot / banned / paused / kill flag set. Drop the
+    // local kill flag so the tools/call gate refuses immediately, then take
+    // out Claude Desktop.
+    if (body && body.blocked === true && !body.adminBypass) {
+      const reason = typeof body.reason === "string" ? body.reason : "ended by team lead";
+      try {
+        fs.mkdirSync(path.dirname(KILL_FLAG), { recursive: true });
+        fs.writeFileSync(KILL_FLAG, JSON.stringify({ reason, setAt: new Date().toISOString() }));
+      } catch {}
+      setTimeout(() => killClaudeDesktop(), 500);
+    }
   } catch {}
 }
 
@@ -116,7 +148,10 @@ async function handle(req) {
   return err(id, -32601, "method not found: " + method);
 }
 
-setInterval(() => { void heartbeat(); }, 60_000);
+// 10s cadence — matches the VS Code extension's enforcement window. Any
+// blocked=true response triggers immediate local kill flag + Claude Desktop
+// process termination, so the wall reforms within 10s of every relaunch.
+setInterval(() => { void heartbeat(); }, 10_000);
 void heartbeat();
 
 const rl = readline.createInterface({ input: process.stdin });
