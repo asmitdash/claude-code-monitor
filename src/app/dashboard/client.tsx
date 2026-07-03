@@ -647,31 +647,105 @@ function SetupCard({
         </div>
       ) : (
         <div>
-          <p className="text-xs text-neutral-400 mb-3">
-            For teammates who use only Claude Desktop (no VS Code). Requires Node.js 20+. After it finishes, fully quit and reopen Claude Desktop.
-          </p>
-          <div className="space-y-3">
-            <InstallerBlock
-              label="macOS / Linux"
-              value="mac"
-              cmd={macCmd}
-              copied={copied}
-              onCopy={() => copy("mac", macCmd)}
-            />
-            <InstallerBlock
-              label="Windows (PowerShell)"
-              value="win"
-              cmd={winCmd}
-              copied={copied}
-              onCopy={() => copy("win", winCmd)}
-            />
-          </div>
+          <DesktopOneClick />
+          <details className="mt-4">
+            <summary className="text-[11px] text-neutral-400 cursor-pointer hover:text-neutral-200 select-none">
+              Prefer to run the command yourself? Show terminal commands.
+            </summary>
+            <div className="mt-3 space-y-3">
+              <p className="text-xs text-neutral-500">
+                Requires Node.js 20+ on the machine.
+              </p>
+              <InstallerBlock
+                label="macOS / Linux"
+                value="mac"
+                cmd={macCmd}
+                copied={copied}
+                onCopy={() => copy("mac", macCmd)}
+              />
+              <InstallerBlock
+                label="Windows (PowerShell)"
+                value="win"
+                cmd={winCmd}
+                copied={copied}
+                onCopy={() => copy("win", winCmd)}
+              />
+            </div>
+          </details>
           <p className="text-[11px] text-neutral-500 mt-3">
             Same MCP server the VS Code extension installs — presence heartbeats + tool-call logging + kill-switch enforcement.
           </p>
         </div>
       )}
     </section>
+  );
+}
+
+function DesktopOneClick() {
+  const [detectedOs, setDetectedOs] = useState<"win" | "mac" | "sh" | null>(null);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    const ua = navigator.userAgent.toLowerCase();
+    const platform = (navigator.platform ?? "").toLowerCase();
+    if (platform.includes("win") || ua.includes("windows")) setDetectedOs("win");
+    else if (platform.includes("mac") || ua.includes("mac os")) setDetectedOs("mac");
+    else setDetectedOs("sh");
+  }, []);
+
+  const primaryLabel =
+    detectedOs === "win"
+      ? "Download for Windows"
+      : detectedOs === "mac"
+      ? "Download for macOS"
+      : detectedOs === "sh"
+      ? "Download for Linux"
+      : "Download installer";
+
+  return (
+    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+      <div className="text-xs text-emerald-100/90 mb-3 leading-relaxed">
+        <strong>One-click install:</strong> download the installer, double-click it, then fully quit and reopen Claude Desktop. Node.js 20+ must be on the machine.
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {detectedOs && (
+          <a
+            href={`/api/setup/desktop-install/oneshot?os=${detectedOs}`}
+            className="rounded-md bg-emerald-500 text-neutral-950 hover:bg-emerald-400 px-3 py-1.5 text-xs font-medium"
+          >
+            {primaryLabel}
+          </a>
+        )}
+        <details className="text-[11px] text-neutral-400">
+          <summary className="cursor-pointer hover:text-neutral-200 select-none">
+            Other OS
+          </summary>
+          <div className="flex gap-2 mt-2">
+            <a
+              href="/api/setup/desktop-install/oneshot?os=win"
+              className="rounded border border-neutral-700 hover:border-neutral-500 px-2 py-1"
+            >
+              Windows (.cmd)
+            </a>
+            <a
+              href="/api/setup/desktop-install/oneshot?os=mac"
+              className="rounded border border-neutral-700 hover:border-neutral-500 px-2 py-1"
+            >
+              macOS (.command)
+            </a>
+            <a
+              href="/api/setup/desktop-install/oneshot?os=sh"
+              className="rounded border border-neutral-700 hover:border-neutral-500 px-2 py-1"
+            >
+              Linux (.sh)
+            </a>
+          </div>
+        </details>
+      </div>
+      <div className="text-[11px] text-neutral-500 mt-2">
+        macOS Gatekeeper: right-click the downloaded file → Open → confirm. Linux: <code className="font-mono">chmod +x</code> first.
+      </div>
+    </div>
   );
 }
 

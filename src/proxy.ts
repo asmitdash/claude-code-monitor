@@ -12,7 +12,9 @@ export default auth((req) => {
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/ingest") ||
     pathname.startsWith("/api/extension") ||
-    pathname.startsWith("/api/setup/") ||
+    // Only the base installer script is public. /oneshot/ bakes the caller's
+    // token into the download and MUST run through the session gate below.
+    pathname === "/api/setup/desktop-install" ||
     pathname.startsWith("/api/invites/validate") ||
     pathname === "/" ||
     pathname.startsWith("/_next") ||
