@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 // tool-call logging + kill-flag enforcement.
 export function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
-  const version = "0.7.0";
+  const version = "0.7.1";
 
   const script = `#!/usr/bin/env node
 // Claude Monitor — Claude Desktop standalone installer (v${version})
@@ -40,16 +40,38 @@ const MCP_SCRIPT = path.join(KILL_DIR, "desktop-mcp.mjs");
 function log(msg) { console.log("[claude-monitor] " + msg); }
 function fail(msg) { console.error("[claude-monitor] " + msg); process.exit(1); }
 
-function claudeDesktopConfigPath() {
+// Claude Desktop config lives in different places depending on the build.
+// The consumer build (documented in Anthropic's public docs) uses
+// %APPDATA%\\Claude on Windows and ~/Library/Application Support/Claude on
+// Mac. The "3p" / enterprise builds put it under %LOCALAPPDATA%\\Claude-3p
+// on Windows and ~/Library/Application Support/Claude-3p on Mac. We
+// discover which one exists on this machine and write there; if neither
+// exists (Claude Desktop never launched) we default to the consumer path
+// so the file materializes for the first launch.
+function claudeDesktopConfigCandidates() {
+  const candidates = [];
   if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    const home = os.homedir();
+    candidates.push(
+      path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json"),
+      path.join(home, "Library", "Application Support", "Claude-3p", "claude_desktop_config.json"),
+    );
+  } else if (process.platform === "win32") {
+    const roaming = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
+    const local = process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local");
+    candidates.push(
+      path.join(roaming, "Claude", "claude_desktop_config.json"),
+      path.join(local, "Claude-3p", "claude_desktop_config.json"),
+      path.join(roaming, "Claude-3p", "claude_desktop_config.json"),
+    );
+  } else {
+    const xdg = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
+    candidates.push(
+      path.join(xdg, "Claude", "claude_desktop_config.json"),
+      path.join(xdg, "Claude-3p", "claude_desktop_config.json"),
+    );
   }
-  if (process.platform === "win32") {
-    const appdata = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
-    return path.join(appdata, "Claude", "claude_desktop_config.json");
-  }
-  const xdg = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
-  return path.join(xdg, "Claude", "claude_desktop_config.json");
+  return candidates;
 }
 
 async function verifyToken(token) {
@@ -213,20 +235,29 @@ async function main() {
   log("  token       -> " + TOKEN_FILE);
   log("  mcp script  -> " + MCP_SCRIPT);
 
-  const cfgPath = claudeDesktopConfigPath();
-  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
-  let cfg = {};
-  if (fs.existsSync(cfgPath)) {
-    try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")); } catch { cfg = {}; }
-  }
-  const mcpServers = cfg.mcpServers ?? {};
-  mcpServers["claude-monitor"] = {
+  // Update every existing Claude Desktop config we find (consumer + 3p can
+  // coexist on the same machine). If none exist yet, write to the consumer
+  // path so a first launch picks it up. We MERGE — preserving any other
+  // mcpServers the user configured — and never overwrite unrelated keys.
+  const candidates = claudeDesktopConfigCandidates();
+  const existing = candidates.filter((p) => fs.existsSync(p));
+  const toWrite = existing.length > 0 ? existing : [candidates[0]];
+  const desired = {
     command: process.execPath || "node",
     args: [MCP_SCRIPT],
   };
-  cfg.mcpServers = mcpServers;
-  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-  log("  desktop cfg -> " + cfgPath);
+  for (const cfgPath of toWrite) {
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+    let cfg = {};
+    if (fs.existsSync(cfgPath)) {
+      try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")); } catch { cfg = {}; }
+    }
+    const mcpServers = cfg.mcpServers ?? {};
+    mcpServers["claude-monitor"] = desired;
+    cfg.mcpServers = mcpServers;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    log("  desktop cfg -> " + cfgPath);
+  }
 
   log("");
   log("Done. Please FULLY QUIT Claude Desktop (not just close the window) and reopen it.");

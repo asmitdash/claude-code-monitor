@@ -14,20 +14,38 @@ const DISCLOSURE_PATH = path.join(KILL_DIR, "disclosure-accepted.json");
 const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const CLAUDE_MD_USER = path.join(os.homedir(), ".claude", "CLAUDE.md");
 const SERVER_URL = "https://claude-code-monitor-theta.vercel.app";
-const EXT_VERSION = "0.7.0";
-// Claude Desktop's config file location differs per OS. We write into whichever
-// exists — if neither does yet, we default to the platform-native path so a
-// first-time Claude Desktop launch will pick it up.
-function claudeDesktopConfigPath(): string {
+const EXT_VERSION = "0.7.1";
+// Claude Desktop's config file lives in different places depending on the
+// build. Consumer build uses %APPDATA%\\Claude (Win) or
+// ~/Library/Application Support/Claude (Mac). "3p" / enterprise builds put
+// it under %LOCALAPPDATA%\\Claude-3p (Win) or
+// ~/Library/Application Support/Claude-3p (Mac). We discover which one
+// exists and write there; if neither exists we default to the consumer
+// path so a first launch picks it up.
+function claudeDesktopConfigCandidates(): string[] {
+  const list: string[] = [];
   if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    const home = os.homedir();
+    list.push(
+      path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json"),
+      path.join(home, "Library", "Application Support", "Claude-3p", "claude_desktop_config.json"),
+    );
+  } else if (process.platform === "win32") {
+    const roaming = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
+    const local = process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local");
+    list.push(
+      path.join(roaming, "Claude", "claude_desktop_config.json"),
+      path.join(local, "Claude-3p", "claude_desktop_config.json"),
+      path.join(roaming, "Claude-3p", "claude_desktop_config.json"),
+    );
+  } else {
+    const xdg = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
+    list.push(
+      path.join(xdg, "Claude", "claude_desktop_config.json"),
+      path.join(xdg, "Claude-3p", "claude_desktop_config.json"),
+    );
   }
-  if (process.platform === "win32") {
-    const appdata = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
-    return path.join(appdata, "Claude", "claude_desktop_config.json");
-  }
-  const xdg = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
-  return path.join(xdg, "Claude", "claude_desktop_config.json");
+  return list;
 }
 
 type BypassState = {
@@ -1063,39 +1081,44 @@ rl.on("close", () => {
 `;
   fs.writeFileSync(DESKTOP_MCP_SCRIPT, mcpScript, { mode: 0o755 });
 
-  const cfgPath = claudeDesktopConfigPath();
-  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
-
-  let cfg: Record<string, unknown> = {};
-  if (fs.existsSync(cfgPath)) {
-    try {
-      cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
-    } catch {
-      cfg = {};
-    }
-  }
-
-  const mcpServers =
-    (cfg.mcpServers as Record<string, Record<string, unknown>> | undefined) ?? {};
+  // Update every config file we find (a machine can have both the consumer
+  // build and the "3p" enterprise build installed side-by-side); if none
+  // exist yet, seed the consumer path so a first launch picks it up.
+  const candidates = claudeDesktopConfigCandidates();
+  const existingPaths = candidates.filter((p) => fs.existsSync(p));
+  const toWrite = existingPaths.length > 0 ? existingPaths : [candidates[0]];
   const desired = {
     command: process.execPath || "node",
     args: [DESKTOP_MCP_SCRIPT],
   };
-  const existing = mcpServers["claude-monitor"];
-  const same =
-    existing &&
-    typeof existing === "object" &&
-    existing.command === desired.command &&
-    Array.isArray(existing.args) &&
-    existing.args.length === desired.args.length &&
-    (existing.args as unknown[]).every((a, i) => a === desired.args[i]);
-
-  if (same) return { configWritten: false };
-
-  mcpServers["claude-monitor"] = desired;
-  cfg.mcpServers = mcpServers;
-  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-  return { configWritten: true };
+  let wroteAny = false;
+  for (const cfgPath of toWrite) {
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+    let cfg: Record<string, unknown> = {};
+    if (fs.existsSync(cfgPath)) {
+      try {
+        cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+      } catch {
+        cfg = {};
+      }
+    }
+    const mcpServers =
+      (cfg.mcpServers as Record<string, Record<string, unknown>> | undefined) ?? {};
+    const existing = mcpServers["claude-monitor"];
+    const same =
+      existing &&
+      typeof existing === "object" &&
+      existing.command === desired.command &&
+      Array.isArray(existing.args) &&
+      existing.args.length === desired.args.length &&
+      (existing.args as unknown[]).every((a, i) => a === desired.args[i]);
+    if (same) continue;
+    mcpServers["claude-monitor"] = desired;
+    cfg.mcpServers = mcpServers;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    wroteAny = true;
+  }
+  return { configWritten: wroteAny };
 }
 
 async function writeTokenFileFromSecret(ctx: vscode.ExtensionContext) {
