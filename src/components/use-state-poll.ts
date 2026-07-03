@@ -152,6 +152,15 @@ export type StatePayload = {
       installedVersion: string | null;
       lastSeenAt: string | null;
     }>;
+    requiredExtensionVersion?: string | null;
+    requiredMcpVersion?: string | null;
+    enforceStaleClientsAfter?: string | null;
+  };
+  mySurfaces?: {
+    hasVsCode: boolean;
+    hasDesktop: boolean;
+    vscodeReportedVersion: string | null;
+    desktopReportedVersion: string | null;
   };
   serverNow: string;
 };

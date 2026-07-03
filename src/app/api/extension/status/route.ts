@@ -72,7 +72,26 @@ export async function POST(req: NextRequest) {
   // (or nothing at all), refuse further hooks and force-end any active slot.
   // Admins bypass this so a stale-extension admin doesn't lock themselves out
   // of the dashboard while investigating.
-  const minVersion = getMinExtensionVersion();
+  const cfgForGate = await getConfig();
+  const source = body.source ? String(body.source) : null;
+  const isDesktopSource = source === "claude-desktop";
+  // Admin-set required version (per surface) takes precedence over the env
+  // default when set, but ONLY after the enforcement deadline has passed.
+  // Before the deadline the banner nudges people to update; server still
+  // accepts stale clients so they don't get locked out mid-workday.
+  const requiredForSource = isDesktopSource
+    ? cfgForGate.requiredMcpVersion
+    : cfgForGate.requiredExtensionVersion;
+  const enforceAfter = cfgForGate.enforceStaleClientsAfter
+    ? new Date(cfgForGate.enforceStaleClientsAfter).getTime()
+    : null;
+  const enforceAdminGate =
+    requiredForSource !== null &&
+    enforceAfter !== null &&
+    Date.now() >= enforceAfter;
+  const minVersion = enforceAdminGate
+    ? String(requiredForSource)
+    : getMinExtensionVersion();
   const versionOk = extensionMeetsMinimum(extensionVersion, minVersion);
   const versionBlocked = !isAdminBypass(user.role) && !versionOk;
   if (versionBlocked) {

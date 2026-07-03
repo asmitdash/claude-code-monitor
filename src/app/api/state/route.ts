@@ -272,6 +272,36 @@ export async function GET() {
 
   const myPresence = presence.get(me.id) ?? null;
 
+  // Surface detection: has the current user reported presence from VS Code
+  // and/or Claude Desktop in the last 7 days? Used by the client to decide
+  // which update buttons to render.
+  const [myVsCodeEvents, myDesktopEvents] = await Promise.all([
+    db
+      .select({ n: sql<number>`count(*)`, ver: sql<string | null>`max(${schema.events.payload}->>'extensionVersion')` })
+      .from(schema.events)
+      .where(
+        and(
+          eq(schema.events.userId, me.id),
+          gt(schema.events.createdAt, sevenDaysAgo),
+          sql`(${schema.events.payload}->>'source') is null or (${schema.events.payload}->>'source') <> 'claude-desktop'`,
+        ),
+      ),
+    db
+      .select({ n: sql<number>`count(*)`, ver: sql<string | null>`max(${schema.events.payload}->>'extensionVersion')` })
+      .from(schema.events)
+      .where(
+        and(
+          eq(schema.events.userId, me.id),
+          gt(schema.events.createdAt, sevenDaysAgo),
+          sql`(${schema.events.payload}->>'source') = 'claude-desktop'`,
+        ),
+      ),
+  ]);
+  const hasVsCode = Number(myVsCodeEvents[0]?.n ?? 0) > 0;
+  const hasDesktop = Number(myDesktopEvents[0]?.n ?? 0) > 0;
+  const vscodeReportedVersion = myVsCodeEvents[0]?.ver ?? myPresence?.extensionVersion ?? null;
+  const desktopReportedVersion = myDesktopEvents[0]?.ver ?? null;
+
   // Version-gate summary for admin banner: list users whose last-reported
   // extensionVersion is below MIN_EXTENSION_VERSION.
   const minExtVersion = getMinExtensionVersion();
@@ -395,6 +425,15 @@ export async function GET() {
     versionGate: {
       minVersion: minExtVersion,
       outdatedUsers,
+      requiredExtensionVersion: cfg.requiredExtensionVersion ?? null,
+      requiredMcpVersion: cfg.requiredMcpVersion ?? null,
+      enforceStaleClientsAfter: cfg.enforceStaleClientsAfter ?? null,
+    },
+    mySurfaces: {
+      hasVsCode,
+      hasDesktop,
+      vscodeReportedVersion,
+      desktopReportedVersion,
     },
     serverNow: new Date().toISOString(),
   });

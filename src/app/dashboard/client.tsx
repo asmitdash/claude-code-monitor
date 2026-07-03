@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useStatePoll } from "@/components/use-state-poll";
+import { useStatePoll, type StatePayload } from "@/components/use-state-poll";
 import { UsageChart } from "@/components/usage-chart";
 import { Countdown } from "@/components/countdown";
 
@@ -26,6 +26,143 @@ function cmpSemver(a: string, b: string): number {
     if ((pa[i] ?? 0) < (pb[i] ?? 0)) return -1;
   }
   return 0;
+}
+
+function RequiredUpdateBanner({
+  versionGate,
+  surfaces,
+}: {
+  versionGate?: StatePayload["versionGate"];
+  surfaces?: StatePayload["mySurfaces"];
+}) {
+  if (!versionGate || !surfaces) return null;
+
+  const {
+    requiredExtensionVersion,
+    requiredMcpVersion,
+    enforceStaleClientsAfter,
+  } = versionGate;
+  const { hasVsCode, hasDesktop, vscodeReportedVersion, desktopReportedVersion } =
+    surfaces;
+
+  // Skip if nothing is configured yet.
+  if (!requiredExtensionVersion && !requiredMcpVersion) return null;
+
+  const vscodeStale =
+    hasVsCode &&
+    requiredExtensionVersion &&
+    (!vscodeReportedVersion ||
+      cmpSemver(vscodeReportedVersion, requiredExtensionVersion) < 0);
+  const desktopStale =
+    hasDesktop &&
+    requiredMcpVersion &&
+    (!desktopReportedVersion ||
+      cmpSemver(desktopReportedVersion, requiredMcpVersion) < 0);
+
+  if (!vscodeStale && !desktopStale) return null;
+
+  const deadline = enforceStaleClientsAfter
+    ? new Date(enforceStaleClientsAfter).getTime()
+    : null;
+  const now = Date.now();
+  const past = deadline !== null && deadline <= now;
+  const remaining = deadline !== null ? Math.max(0, deadline - now) : null;
+  const days = remaining !== null ? Math.floor(remaining / 86400000) : null;
+  const hours =
+    remaining !== null ? Math.floor((remaining % 86400000) / 3600000) : null;
+
+  const severity = past ? "alert" : "warn";
+  const border =
+    severity === "alert"
+      ? "border-red-500/40 bg-red-500/10 text-red-100"
+      : "border-amber-500/40 bg-amber-500/10 text-amber-100";
+
+  return (
+    <div className={`rounded-xl border px-4 py-3 text-sm ${border}`}>
+      <div className="font-medium">
+        {past
+          ? "Your Claude Monitor client is out of date and will be blocked"
+          : "Please update your Claude Monitor client"}
+      </div>
+      <div className="text-xs mt-1 opacity-90 leading-relaxed">
+        {vscodeStale && (
+          <div>
+            VS Code extension: you&apos;re on{" "}
+            <code className="font-mono">{vscodeReportedVersion ?? "unknown"}</code>
+            , required is <code className="font-mono">v{requiredExtensionVersion}</code>.
+          </div>
+        )}
+        {desktopStale && (
+          <div>
+            Claude Desktop MCP: you&apos;re on{" "}
+            <code className="font-mono">{desktopReportedVersion ?? "unknown"}</code>
+            , required is <code className="font-mono">v{requiredMcpVersion}</code>.
+          </div>
+        )}
+        {deadline !== null && (
+          <div className="mt-1">
+            {past ? (
+              <>Enforcement is active — usage is being blocked.</>
+            ) : (
+              <>
+                Your usage will be blocked in{" "}
+                <strong>
+                  {days === 0 && hours === 0
+                    ? "less than an hour"
+                    : `${days ?? 0}d ${hours ?? 0}h`}
+                </strong>{" "}
+                (
+                {new Date(deadline).toLocaleString(undefined, {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                ).
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {vscodeStale && (
+          <a
+            href={DOWNLOAD_URL}
+            download
+            className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+              severity === "alert"
+                ? "bg-red-500 text-neutral-950 hover:bg-red-400"
+                : "bg-amber-500 text-neutral-950 hover:bg-amber-400"
+            }`}
+          >
+            Download VS Code .vsix
+          </a>
+        )}
+        {desktopStale && (
+          <a
+            href="/api/setup/desktop-install/oneshot?os=win"
+            className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+              severity === "alert"
+                ? "bg-red-500 text-neutral-950 hover:bg-red-400"
+                : "bg-amber-500 text-neutral-950 hover:bg-amber-400"
+            }`}
+          >
+            Download Claude Desktop installer
+          </a>
+        )}
+        {desktopStale && (
+          <a
+            href="/api/setup/desktop-mcp-script"
+            download="desktop-mcp.mjs"
+            className="rounded-md border border-neutral-700 hover:border-neutral-500 px-3 py-1.5 text-xs"
+          >
+            Or just the MCP script
+          </a>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ExtensionUpdateBanner({
@@ -226,6 +363,10 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
           </a>
         )}
       </div>
+      <RequiredUpdateBanner
+        versionGate={data.versionGate}
+        surfaces={data.mySurfaces}
+      />
       <ExtensionUpdateBanner installedVersion={data.me.extensionVersion ?? null} />
       {data.banner && (
         <div

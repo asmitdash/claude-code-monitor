@@ -265,6 +265,12 @@ export const quotaConfig = pgTable("quota_config", {
   staleHeartbeatMinutes: integer("stale_heartbeat_minutes").notNull().default(2),
   staleHeartbeatEnabled: boolean("stale_heartbeat_enabled").notNull().default(true),
   bypassPermissionsEnabled: boolean("bypass_permissions_enabled").notNull().default(true),
+  // Version gate: extensions/MCPs below these versions get a warning banner
+  // now and are blocked outright after `enforceStaleClientsAfter`. Null means
+  // "no gate set" — banner off, no enforcement.
+  requiredExtensionVersion: text("required_extension_version"),
+  requiredMcpVersion: text("required_mcp_version"),
+  enforceStaleClientsAfter: timestamp("enforce_stale_clients_after", { withTimezone: true }),
   graceTimerSeconds: integer("grace_timer_seconds").notNull().default(60),
   maxConcurrentSlots: integer("max_concurrent_slots").notNull().default(2),
   freezeBanner: text("freeze_banner"),

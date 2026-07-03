@@ -1206,6 +1206,90 @@ function ConfigTab() {
           {cfg.bypassPermissionsEnabled ? "On" : "Off"}
         </button>
       </div>
+
+      <div className="mt-4 rounded border border-neutral-800 bg-neutral-950/60 p-3 space-y-2">
+        <div className="text-xs text-neutral-300">Required client versions (upgrade wall)</div>
+        <div className="text-[11px] text-neutral-500 leading-relaxed">
+          When set, users below these versions see a warning banner on the dashboard with download buttons. After the enforcement date, their heartbeats return blocked=true and their surface (VS Code extension / Claude Desktop MCP) gets torn down until they update. Set the deadline ~3 days out to give people time to update.
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+          <label className="text-xs">
+            <div className="text-neutral-400 mb-1">Required extension version</div>
+            <input
+              type="text"
+              defaultValue={String(cfg.requiredExtensionVersion ?? "")}
+              placeholder="0.8.0"
+              onBlur={(e) => update({ requiredExtensionVersion: e.target.value.trim() || null })}
+              disabled={pending}
+              className="w-full rounded bg-neutral-950 border border-neutral-800 px-2 py-1.5 text-sm font-mono"
+            />
+          </label>
+          <label className="text-xs">
+            <div className="text-neutral-400 mb-1">Required MCP version</div>
+            <input
+              type="text"
+              defaultValue={String(cfg.requiredMcpVersion ?? "")}
+              placeholder="0.8.0"
+              onBlur={(e) => update({ requiredMcpVersion: e.target.value.trim() || null })}
+              disabled={pending}
+              className="w-full rounded bg-neutral-950 border border-neutral-800 px-2 py-1.5 text-sm font-mono"
+            />
+          </label>
+          <label className="text-xs">
+            <div className="text-neutral-400 mb-1">Enforce after (local time)</div>
+            <input
+              type="datetime-local"
+              defaultValue={
+                cfg.enforceStaleClientsAfter
+                  ? new Date(String(cfg.enforceStaleClientsAfter))
+                      .toISOString()
+                      .slice(0, 16)
+                  : ""
+              }
+              onBlur={(e) =>
+                update({
+                  enforceStaleClientsAfter: e.target.value
+                    ? new Date(e.target.value).toISOString()
+                    : null,
+                })
+              }
+              disabled={pending}
+              className="w-full rounded bg-neutral-950 border border-neutral-800 px-2 py-1.5 text-sm"
+            />
+          </label>
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() =>
+              update({
+                enforceStaleClientsAfter: new Date(
+                  Date.now() + 3 * 24 * 60 * 60 * 1000,
+                ).toISOString(),
+              })
+            }
+            disabled={pending}
+            className="rounded border border-neutral-700 hover:border-neutral-500 text-neutral-300 px-2 py-1 text-[11px]"
+          >
+            Enforce in 3 days
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              update({
+                requiredExtensionVersion: null,
+                requiredMcpVersion: null,
+                enforceStaleClientsAfter: null,
+              })
+            }
+            disabled={pending}
+            className="rounded border border-neutral-700 hover:border-neutral-500 text-neutral-400 px-2 py-1 text-[11px]"
+          >
+            Clear all
+          </button>
+        </div>
+      </div>
+
       <div className="text-[11px] text-neutral-500 mt-3">
         Last updated: {cfg.updatedAt ? new Date(String(cfg.updatedAt)).toLocaleString() : "—"} by{" "}
         {String(cfg.updatedBy ?? "—")}
