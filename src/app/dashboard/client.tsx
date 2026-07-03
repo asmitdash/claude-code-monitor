@@ -705,8 +705,29 @@ function DesktopOneClick() {
   return (
     <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
       <div className="text-xs text-emerald-100/90 mb-3 leading-relaxed">
-        <strong>One-click install:</strong> download the installer, double-click it, then fully quit and reopen Claude Desktop. Node.js 20+ must be on the machine.
+        Prereq: Node.js 20+ installed. Grab it from{" "}
+        <a
+          href="https://nodejs.org/"
+          target="_blank"
+          rel="noreferrer"
+          className="underline decoration-emerald-300/60 hover:text-emerald-50"
+        >
+          nodejs.org
+        </a>{" "}
+        if you don&apos;t have it.
       </div>
+      <ol className="text-xs text-emerald-100/90 space-y-2 list-decimal list-inside leading-relaxed mb-3">
+        <li>
+          Click <strong>Download installer</strong> below. A small launcher file will download with your token already baked in.
+        </li>
+        <li>
+          Double-click the downloaded file. A terminal window opens and runs the install. Press any key when it says <em>Done</em>.
+        </li>
+        <li>
+          <strong>Fully quit Claude Desktop</strong> — right-click the tray icon in the Windows system tray (or Cmd-Q on Mac) → <em>Quit</em>. Just closing the window is not enough; the process needs to exit.
+        </li>
+        <li>Reopen Claude Desktop. Within ~60 seconds your presence shows up on the dashboard.</li>
+      </ol>
       <div className="flex flex-wrap items-center gap-2">
         {detectedOs && (
           <a
@@ -742,9 +763,29 @@ function DesktopOneClick() {
           </div>
         </details>
       </div>
-      <div className="text-[11px] text-neutral-500 mt-2">
-        macOS Gatekeeper: right-click the downloaded file → Open → confirm. Linux: <code className="font-mono">chmod +x</code> first.
-      </div>
+      <details className="text-[11px] text-neutral-400 mt-3">
+        <summary className="cursor-pointer hover:text-neutral-200 select-none">
+          Platform notes & troubleshooting
+        </summary>
+        <ul className="mt-2 space-y-1.5 leading-relaxed list-disc list-inside text-neutral-500">
+          <li>
+            <strong>Windows SmartScreen</strong> may block the .cmd on the first run. Click{" "}
+            <em>More info → Run anyway</em>.
+          </li>
+          <li>
+            <strong>macOS Gatekeeper</strong> may block the .command file. Right-click the downloaded file → Open → confirm.
+          </li>
+          <li>
+            <strong>Linux</strong>: run <code className="font-mono bg-neutral-950 border border-neutral-800 rounded px-1">chmod +x claude-monitor-install.sh</code> once, then double-click or run.
+          </li>
+          <li>
+            <strong>Both Claude Desktop builds supported.</strong> The installer detects the consumer build (config in <code className="font-mono">%APPDATA%\Claude</code>) and the &quot;3p&quot; enterprise build (<code className="font-mono">%LOCALAPPDATA%\Claude-3p</code> on Windows, <code className="font-mono">~/Library/Application Support/Claude-3p</code> on Mac) and writes to whichever exists.
+          </li>
+          <li>
+            <strong>Not showing up after restart?</strong> Open Claude Desktop → Settings → Developer → MCP Servers. If <code className="font-mono">claude-monitor</code> is missing, run the installer again — you probably had an older build that wrote to the wrong path.
+          </li>
+        </ul>
+      </details>
     </div>
   );
 }
