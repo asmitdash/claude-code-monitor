@@ -570,42 +570,27 @@ export function DashboardClient({ apiToken, myEmail }: { apiToken: string; myEma
         <UsageChart data={data.myUsage} height={200} />
       </section>
 
-      <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide">
-            Extension API token
-          </h2>
-          <button
-            onClick={() => setShowToken((s) => !s)}
-            className="text-xs text-neutral-400 hover:text-neutral-200"
-          >
-            {showToken ? "Hide" : "Show"}
-          </button>
-        </div>
-        <p className="text-xs text-neutral-500 mb-2">
-          Paste this into the Claude Monitor VS Code extension, or into the
-          Claude Desktop installer below.
-        </p>
-        <code className="block break-all rounded bg-neutral-950 border border-neutral-800 px-3 py-2 text-[11px] font-mono">
-          {showToken ? apiToken : "•".repeat(40)}
-        </code>
-      </section>
-
-      <DesktopInstallerCard apiToken={apiToken} showToken={showToken} />
+      <SetupCard
+        apiToken={apiToken}
+        showToken={showToken}
+        onToggleShow={() => setShowToken((s) => !s)}
+      />
     </main>
   );
 }
 
-function DesktopInstallerCard({
+function SetupCard({
   apiToken,
   showToken,
+  onToggleShow,
 }: {
   apiToken: string;
   showToken: boolean;
+  onToggleShow: () => void;
 }) {
+  const [tab, setTab] = useState<"vscode" | "desktop">("vscode");
   const [copied, setCopied] = useState<string | null>(null);
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
   const tokenForCmd = showToken ? apiToken : "YOUR_TOKEN";
   const macCmd = `curl -fsSL ${origin}/api/setup/desktop-install -o /tmp/install.mjs && node /tmp/install.mjs --token=${tokenForCmd}`;
   const winCmd = `curl.exe -fsSL ${origin}/api/setup/desktop-install -o "$env:TEMP\\install.mjs"; node "$env:TEMP\\install.mjs" --token=${tokenForCmd}`;
@@ -619,35 +604,98 @@ function DesktopInstallerCard({
   }
 
   return (
-    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 mt-4">
-      <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-2">
-        Claude Desktop — standalone install (no VS Code needed)
-      </h2>
-      <p className="text-xs text-neutral-500 mb-3">
-        For teammates who use only Claude Desktop. Requires Node.js 20+ on the
-        machine. After it finishes, fully quit and reopen Claude Desktop.
-      </p>
-      <div className="space-y-3">
-        <InstallerBlock
-          label="macOS / Linux"
-          value="mac"
-          cmd={macCmd}
-          copied={copied}
-          onCopy={() => copy("mac", macCmd)}
-        />
-        <InstallerBlock
-          label="Windows (PowerShell)"
-          value="win"
-          cmd={winCmd}
-          copied={copied}
-          onCopy={() => copy("win", winCmd)}
-        />
+    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wide">
+          Setup
+        </h2>
+        <button
+          onClick={onToggleShow}
+          className="text-xs text-neutral-400 hover:text-neutral-200"
+        >
+          {showToken ? "Hide token" : "Show token"}
+        </button>
       </div>
-      <p className="text-[11px] text-neutral-500 mt-3">
-        Same MCP server behavior as the VS Code extension installs — presence
-        heartbeats + tool-call logging + kill-switch enforcement.
-      </p>
+
+      <div className="mb-3">
+        <div className="text-[11px] uppercase tracking-wide text-neutral-500 mb-1">
+          Your API token
+        </div>
+        <code className="block break-all rounded bg-neutral-950 border border-neutral-800 px-3 py-2 text-[11px] font-mono">
+          {showToken ? apiToken : "•".repeat(40)}
+        </code>
+      </div>
+
+      <div className="flex gap-1 mb-3 border-b border-neutral-800">
+        <TabButton active={tab === "vscode"} onClick={() => setTab("vscode")}>
+          VS Code (Claude Code)
+        </TabButton>
+        <TabButton active={tab === "desktop"} onClick={() => setTab("desktop")}>
+          Claude Desktop app
+        </TabButton>
+      </div>
+
+      {tab === "vscode" ? (
+        <div>
+          <ol className="text-xs text-neutral-400 space-y-1.5 list-decimal list-inside">
+            <li>Install the Claude Monitor VS Code extension (.vsix) from the update banner at the top of this page.</li>
+            <li>
+              Run <code className="font-mono text-[11px] bg-neutral-950 border border-neutral-800 rounded px-1">Claude Monitor: Sign in</code> from the command palette.
+            </li>
+            <li>Paste the API token above. The extension installs the Claude Code hook and, if Claude Desktop is on the machine, the Desktop MCP too.</li>
+          </ol>
+        </div>
+      ) : (
+        <div>
+          <p className="text-xs text-neutral-400 mb-3">
+            For teammates who use only Claude Desktop (no VS Code). Requires Node.js 20+. After it finishes, fully quit and reopen Claude Desktop.
+          </p>
+          <div className="space-y-3">
+            <InstallerBlock
+              label="macOS / Linux"
+              value="mac"
+              cmd={macCmd}
+              copied={copied}
+              onCopy={() => copy("mac", macCmd)}
+            />
+            <InstallerBlock
+              label="Windows (PowerShell)"
+              value="win"
+              cmd={winCmd}
+              copied={copied}
+              onCopy={() => copy("win", winCmd)}
+            />
+          </div>
+          <p className="text-[11px] text-neutral-500 mt-3">
+            Same MCP server the VS Code extension installs — presence heartbeats + tool-call logging + kill-switch enforcement.
+          </p>
+        </div>
+      )}
     </section>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1.5 text-xs -mb-px border-b-2 ${
+        active
+          ? "border-emerald-400 text-neutral-100"
+          : "border-transparent text-neutral-400 hover:text-neutral-200"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

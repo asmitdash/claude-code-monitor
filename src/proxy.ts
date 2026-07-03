@@ -12,6 +12,7 @@ export default auth((req) => {
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/ingest") ||
     pathname.startsWith("/api/extension") ||
+    pathname.startsWith("/api/setup/") ||
     pathname.startsWith("/api/invites/validate") ||
     pathname === "/" ||
     pathname.startsWith("/_next") ||

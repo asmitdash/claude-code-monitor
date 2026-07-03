@@ -70,6 +70,8 @@ export default async function DigestPage() {
   const t = totals[0] ?? { n: 0, totalMin: 0, avgTtft: 0, idleWarnSum: 0 };
   const untagged = slots.filter((s) => s.endedAt && !s.outcomeTag);
 
+  const portwayUrl = process.env.NEXT_PUBLIC_PORTWAY_URL || "https://portway.app";
+
   return (
     <main className="max-w-4xl mx-auto px-6 py-6 space-y-8">
       <div>
@@ -77,6 +79,22 @@ export default async function DigestPage() {
         <p className="text-sm text-neutral-400 mt-1">
           Last 7 days · non-punitive, just self-visibility.
         </p>
+      </div>
+
+      <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-xs text-amber-100/90 flex items-start gap-2">
+        <span aria-hidden>💬</span>
+        <div>
+          If you want to use the Claude Desktop app too, please contact Asmit Dash regarding the setup and API access using the{" "}
+          <a
+            href={portwayUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="underline decoration-amber-300/60 hover:text-amber-50"
+          >
+            Portway portal
+          </a>
+          .
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-3">
