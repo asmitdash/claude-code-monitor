@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "publish:vsix": "node scripts/publish-vsix.mjs",
+    "release": "cd extension && npm run package && cd .. && npm run publish:vsix"
   },
   "dependencies": {
     "@auth/core": "^0.41.2",
