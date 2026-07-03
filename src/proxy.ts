@@ -12,9 +12,11 @@ export default auth((req) => {
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/ingest") ||
     pathname.startsWith("/api/extension") ||
-    // Only the base installer script is public. /oneshot/ bakes the caller's
-    // token into the download and MUST run through the session gate below.
+    // Only the base installer script and the raw MCP-server script are public
+    // (no user secrets in either). /oneshot bakes the caller's token into the
+    // download and MUST run through the session gate below.
     pathname === "/api/setup/desktop-install" ||
+    pathname === "/api/setup/desktop-mcp-script" ||
     pathname.startsWith("/api/invites/validate") ||
     pathname === "/" ||
     pathname.startsWith("/_next") ||

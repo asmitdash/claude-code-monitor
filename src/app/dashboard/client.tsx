@@ -648,6 +648,12 @@ function SetupCard({
       ) : (
         <div>
           <DesktopOneClick />
+          <DesktopManualInstall
+            apiToken={apiToken}
+            showToken={showToken}
+            copied={copied}
+            onCopy={copy}
+          />
           <details className="mt-4">
             <summary className="text-[11px] text-neutral-400 cursor-pointer hover:text-neutral-200 select-none">
               Prefer to run the command yourself? Show terminal commands.
@@ -787,6 +793,192 @@ function DesktopOneClick() {
         </ul>
       </details>
     </div>
+  );
+}
+
+function DesktopManualInstall({
+  apiToken,
+  showToken,
+  copied,
+  onCopy,
+}: {
+  apiToken: string;
+  showToken: boolean;
+  copied: string | null;
+  onCopy: (label: string, text: string) => void;
+}) {
+  const tokenForSnippet = showToken ? apiToken : "PASTE_YOUR_TOKEN_HERE";
+  const [os, setOs] = useState<"win" | "mac" | "linux">("win");
+
+  const paths = {
+    win: {
+      script: "C:\\\\Users\\\\<YOU>\\\\.claude-monitor\\\\desktop-mcp.mjs",
+      token: "C:\\\\Users\\\\<YOU>\\\\.claude-monitor\\\\token",
+      node: "C:\\\\Program Files\\\\nodejs\\\\node.exe",
+      cfgConsumer: "%APPDATA%\\Claude\\claude_desktop_config.json",
+      cfg3p: "%LOCALAPPDATA%\\Claude-3p\\claude_desktop_config.json",
+    },
+    mac: {
+      script: "/Users/<you>/.claude-monitor/desktop-mcp.mjs",
+      token: "/Users/<you>/.claude-monitor/token",
+      node: "/usr/local/bin/node",
+      cfgConsumer:
+        "~/Library/Application Support/Claude/claude_desktop_config.json",
+      cfg3p:
+        "~/Library/Application Support/Claude-3p/claude_desktop_config.json",
+    },
+    linux: {
+      script: "/home/<you>/.claude-monitor/desktop-mcp.mjs",
+      token: "/home/<you>/.claude-monitor/token",
+      node: "/usr/bin/node",
+      cfgConsumer: "~/.config/Claude/claude_desktop_config.json",
+      cfg3p: "~/.config/Claude-3p/claude_desktop_config.json",
+    },
+  };
+  const p = paths[os];
+
+  const snippet = JSON.stringify(
+    {
+      mcpServers: {
+        "claude-monitor": {
+          command: p.node,
+          args: [p.script.replace(/\\\\/g, "\\")],
+        },
+      },
+    },
+    null,
+    2,
+  );
+
+  return (
+    <details className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/5 p-4">
+      <summary className="text-xs text-amber-100/90 cursor-pointer hover:text-amber-50 select-none">
+        Installer didn&apos;t work? Set it up manually (works on every build)
+      </summary>
+      <div className="mt-3 space-y-4 text-xs text-neutral-300">
+        <p className="text-neutral-400 leading-relaxed">
+          The one-click installer auto-detects Claude Desktop&apos;s config
+          location. If your build stores config somewhere else, this manual
+          path always works — you tell Claude Desktop where the MCP script is,
+          using its own <strong>Edit Config</strong> button.
+        </p>
+
+        <div className="flex gap-1 border-b border-neutral-800">
+          <ManualOsTab active={os === "win"} onClick={() => setOs("win")}>
+            Windows
+          </ManualOsTab>
+          <ManualOsTab active={os === "mac"} onClick={() => setOs("mac")}>
+            macOS
+          </ManualOsTab>
+          <ManualOsTab active={os === "linux"} onClick={() => setOs("linux")}>
+            Linux
+          </ManualOsTab>
+        </div>
+
+        <ol className="list-decimal list-inside space-y-3 leading-relaxed">
+          <li>
+            <div className="inline">
+              <strong>Download the MCP script</strong> and save it to{" "}
+              <code className="font-mono text-[11px] bg-neutral-950 border border-neutral-800 rounded px-1">
+                {p.script.replace(/\\\\/g, "\\")}
+              </code>{" "}
+              (create the <code className="font-mono text-[11px] bg-neutral-950 border border-neutral-800 rounded px-1">.claude-monitor</code> folder in your home directory if it doesn&apos;t exist).
+            </div>
+            <div className="mt-2">
+              <a
+                href="/api/setup/desktop-mcp-script"
+                download="desktop-mcp.mjs"
+                className="inline-block rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-100 px-2.5 py-1 text-[11px]"
+              >
+                Download desktop-mcp.mjs
+              </a>
+            </div>
+          </li>
+
+          <li>
+            <strong>Save your API token</strong> to{" "}
+            <code className="font-mono text-[11px] bg-neutral-950 border border-neutral-800 rounded px-1">
+              {p.token.replace(/\\\\/g, "\\")}
+            </code>{" "}
+            as a plain text file (no quotes, no trailing newline). Token above.
+          </li>
+
+          <li>
+            <div>
+              <strong>Open Claude Desktop → Settings → Developer → Local MCP servers → Edit Config.</strong> That opens{" "}
+              <code className="font-mono text-[11px] bg-neutral-950 border border-neutral-800 rounded px-1">
+                claude_desktop_config.json
+              </code>{" "}
+              in your text editor. Common paths:
+            </div>
+            <ul className="mt-1 ml-4 space-y-1 text-neutral-400 text-[11px]">
+              <li>
+                Consumer build:{" "}
+                <code className="font-mono">{p.cfgConsumer}</code>
+              </li>
+              <li>
+                Enterprise / &quot;3p&quot; build:{" "}
+                <code className="font-mono">{p.cfg3p}</code>
+              </li>
+            </ul>
+          </li>
+
+          <li>
+            <div>
+              <strong>Merge this into <code className="font-mono text-[11px] bg-neutral-950 border border-neutral-800 rounded px-1">mcpServers</code></strong> (keep any existing entries, add ours alongside):
+            </div>
+            <div className="mt-2 relative">
+              <button
+                type="button"
+                onClick={() => onCopy(`snippet-${os}`, snippet)}
+                className="absolute top-2 right-2 text-[10px] bg-neutral-800 hover:bg-neutral-700 rounded px-1.5 py-0.5"
+              >
+                {copied === `snippet-${os}` ? "Copied ✓" : "Copy"}
+              </button>
+              <pre className="rounded bg-neutral-950 border border-neutral-800 p-3 text-[11px] font-mono whitespace-pre-wrap break-all overflow-x-auto">
+                {snippet}
+              </pre>
+            </div>
+            <div className="mt-1 text-[11px] text-neutral-500">
+              Replace <code className="font-mono">&lt;YOU&gt;</code>/<code className="font-mono">&lt;you&gt;</code> with your actual username. On Windows, if your token is above with <em>Show</em>, click <strong>Show token</strong> above and it&apos;ll appear in your file too.
+            </div>
+            {!showToken && (
+              <div className="mt-1 text-[11px] text-amber-300">
+                Note: the token in the snippet says <code className="font-mono">{tokenForSnippet}</code>. The MCP script actually reads it from the token file, not the config — so this line doesn&apos;t need editing.
+              </div>
+            )}
+          </li>
+
+          <li>
+            <strong>Save the config file, fully quit Claude Desktop (right-click tray icon → Quit), reopen.</strong> Under Settings → Developer → Local MCP servers you should now see <code className="font-mono text-[11px] bg-neutral-950 border border-neutral-800 rounded px-1">claude-monitor · running</code>.
+          </li>
+        </ol>
+      </div>
+    </details>
+  );
+}
+
+function ManualOsTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-2.5 py-1 text-[11px] -mb-px border-b-2 ${
+        active
+          ? "border-amber-400 text-neutral-100"
+          : "border-transparent text-neutral-400 hover:text-neutral-200"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
