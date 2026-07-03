@@ -41,11 +41,28 @@ export async function POST(req: NextRequest) {
     ? String(body.extensionVersion).slice(0, 30)
     : null;
 
+  // Detect the reporting surface: Desktop MCP heartbeats set source=claude-desktop,
+  // VS Code extension heartbeats don't set source. Write the version into the
+  // matching per-surface column so one surface's stale ping can't clobber the
+  // other's fresh number.
+  const heartbeatSource = body.source ? String(body.source) : null;
+  const isDesktopHeartbeat = heartbeatSource === "claude-desktop";
+  const now = new Date();
+  const perSurface = isDesktopHeartbeat
+    ? {
+        desktopMcpVersion: extensionVersion,
+        desktopMcpSeenAt: now,
+      }
+    : {
+        vscodeExtensionVersion: extensionVersion,
+        vscodeExtensionSeenAt: now,
+      };
+
   await db
     .insert(schema.presence)
     .values({
       userId: user.id,
-      lastSeenAt: new Date(),
+      lastSeenAt: now,
       claudeRunning,
       claudeOpen,
       vscodeOpen,
@@ -53,11 +70,12 @@ export async function POST(req: NextRequest) {
       vscodeWindow,
       hostname,
       extensionVersion,
+      ...perSurface,
     })
     .onConflictDoUpdate({
       target: schema.presence.userId,
       set: {
-        lastSeenAt: new Date(),
+        lastSeenAt: now,
         claudeRunning,
         claudeOpen,
         vscodeOpen,
@@ -65,6 +83,7 @@ export async function POST(req: NextRequest) {
         vscodeWindow,
         hostname,
         extensionVersion,
+        ...perSurface,
       },
     });
 
@@ -73,8 +92,7 @@ export async function POST(req: NextRequest) {
   // Admins bypass this so a stale-extension admin doesn't lock themselves out
   // of the dashboard while investigating.
   const cfgForGate = await getConfig();
-  const source = body.source ? String(body.source) : null;
-  const isDesktopSource = source === "claude-desktop";
+  const isDesktopSource = isDesktopHeartbeat;
   // Admin-set required version (per surface) takes precedence over the env
   // default when set, but ONLY after the enforcement deadline has passed.
   // Before the deadline the banner nudges people to update; server still

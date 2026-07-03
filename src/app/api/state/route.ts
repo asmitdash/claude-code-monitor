@@ -272,35 +272,26 @@ export async function GET() {
 
   const myPresence = presence.get(me.id) ?? null;
 
-  // Surface detection: has the current user reported presence from VS Code
-  // and/or Claude Desktop in the last 7 days? Used by the client to decide
-  // which update buttons to render.
-  const [myVsCodeEvents, myDesktopEvents] = await Promise.all([
-    db
-      .select({ n: sql<number>`count(*)`, ver: sql<string | null>`max(${schema.events.payload}->>'extensionVersion')` })
-      .from(schema.events)
-      .where(
-        and(
-          eq(schema.events.userId, me.id),
-          gt(schema.events.createdAt, sevenDaysAgo),
-          sql`(${schema.events.payload}->>'source') is null or (${schema.events.payload}->>'source') <> 'claude-desktop'`,
-        ),
-      ),
-    db
-      .select({ n: sql<number>`count(*)`, ver: sql<string | null>`max(${schema.events.payload}->>'extensionVersion')` })
-      .from(schema.events)
-      .where(
-        and(
-          eq(schema.events.userId, me.id),
-          gt(schema.events.createdAt, sevenDaysAgo),
-          sql`(${schema.events.payload}->>'source') = 'claude-desktop'`,
-        ),
-      ),
-  ]);
-  const hasVsCode = Number(myVsCodeEvents[0]?.n ?? 0) > 0;
-  const hasDesktop = Number(myDesktopEvents[0]?.n ?? 0) > 0;
-  const vscodeReportedVersion = myVsCodeEvents[0]?.ver ?? myPresence?.extensionVersion ?? null;
-  const desktopReportedVersion = myDesktopEvents[0]?.ver ?? null;
+  // Surface detection reads presence's per-surface columns. The seen-at
+  // timestamp tells us whether the last-reported version is still trustworthy;
+  // anything older than 7 days is treated as "surface no longer installed"
+  // and the corresponding update banner is suppressed.
+  const SURFACE_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+  const nowMs = Date.now();
+  const vscodeSeen = myPresence?.vscodeExtensionSeenAt
+    ? new Date(myPresence.vscodeExtensionSeenAt).getTime()
+    : null;
+  const desktopSeen = myPresence?.desktopMcpSeenAt
+    ? new Date(myPresence.desktopMcpSeenAt).getTime()
+    : null;
+  const hasVsCode = vscodeSeen !== null && nowMs - vscodeSeen < SURFACE_STALE_MS;
+  const hasDesktop = desktopSeen !== null && nowMs - desktopSeen < SURFACE_STALE_MS;
+  const vscodeReportedVersion = hasVsCode
+    ? myPresence?.vscodeExtensionVersion ?? null
+    : null;
+  const desktopReportedVersion = hasDesktop
+    ? myPresence?.desktopMcpVersion ?? null
+    : null;
 
   // Version-gate summary for admin banner: list users whose last-reported
   // extensionVersion is below MIN_EXTENSION_VERSION.

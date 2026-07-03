@@ -49,6 +49,13 @@ export const users = pgTable("users", {
   role: roleEnum("role").notNull().default("member"),
   apiToken: text("api_token").notNull().unique(),
   passwordHash: text("password_hash"),
+  // Device binding: on first heartbeat with a fingerprint, we bind the user
+  // to that device. Any later heartbeat with a different fingerprint is
+  // refused ("email is bound to another laptop"). Admin can clear via the
+  // dashboard, which lets the next device claim the binding.
+  boundDeviceFingerprint: text("bound_device_fingerprint"),
+  boundDeviceHostname: text("bound_device_hostname"),
+  boundDeviceAt: timestamp("bound_device_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -164,6 +171,14 @@ export const presence = pgTable("presence", {
   vscodeWindow: text("vscode_window"),
   hostname: text("hostname"),
   extensionVersion: text("extension_version"),
+  // Per-surface version tracking. Each source updates only its own column so
+  // one surface's stale ping can't clobber the other's fresh number. The
+  // legacy `extensionVersion` column is still written (backward-compat) but
+  // clients should read the specific columns below.
+  vscodeExtensionVersion: text("vscode_extension_version"),
+  vscodeExtensionSeenAt: timestamp("vscode_extension_seen_at", { withTimezone: true }),
+  desktopMcpVersion: text("desktop_mcp_version"),
+  desktopMcpSeenAt: timestamp("desktop_mcp_seen_at", { withTimezone: true }),
   activityScore: integer("activity_score").notNull().default(0),
 });
 
